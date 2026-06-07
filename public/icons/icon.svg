@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Emerald background with rounded corners -->
+  <rect width="512" height="512" rx="112" fill="#10b981"/>
+  <!-- Bold "D" lettermark — dark green on emerald -->
+  <text
+    x="258"
+    y="368"
+    font-family="Arial Black, Arial, system-ui, -apple-system, sans-serif"
+    font-size="308"
+    font-weight="900"
+    text-anchor="middle"
+    fill="#052e16"
+    letter-spacing="-8"
+  >D</text>
+</svg>

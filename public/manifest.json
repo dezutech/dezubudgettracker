@@ -1,0 +1,66 @@
+{
+  "name": "Dezu Budget Tracker",
+  "short_name": "Dezu Budget",
+  "description": "Offline-first personal finance tracker. Track wallets, budgets, goals and recurring transactions — all stored locally on your device.",
+  "start_url": "/",
+  "id": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "background_color": "#09090b",
+  "theme_color": "#10b981",
+  "orientation": "portrait-primary",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": ["finance", "utilities", "productivity"],
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Dashboard",
+      "short_name": "Dashboard",
+      "url": "/",
+      "description": "View financial overview",
+      "icons": [{ "src": "/icons/icon.svg", "sizes": "any" }]
+    },
+    {
+      "name": "Transactions",
+      "short_name": "Transactions",
+      "url": "/transactions",
+      "description": "Record a new transaction",
+      "icons": [{ "src": "/icons/icon.svg", "sizes": "any" }]
+    },
+    {
+      "name": "Budgets",
+      "short_name": "Budgets",
+      "url": "/budgets",
+      "description": "Check spending limits",
+      "icons": [{ "src": "/icons/icon.svg", "sizes": "any" }]
+    },
+    {
+      "name": "Goals",
+      "short_name": "Goals",
+      "url": "/goals",
+      "description": "Track savings goals",
+      "icons": [{ "src": "/icons/icon.svg", "sizes": "any" }]
+    }
+  ],
+  "screenshots": [
+    {
+      "label": "Dashboard overview",
+      "form_factor": "narrow"
+    }
+  ]
+}

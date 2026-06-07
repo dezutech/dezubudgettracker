@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!--
+    Maskable icon: content must sit inside the "safe zone" —
+    a centred circle of 80% diameter (≈ 205px radius from centre 256,256).
+    The full bleed background fills the whole canvas including corners
+    that will be cut by rounded masks on Android.
+  -->
+  <rect width="512" height="512" fill="#10b981"/>
+  <!-- "D" scaled down to fit safe zone comfortably -->
+  <text
+    x="258"
+    y="330"
+    font-family="Arial Black, Arial, system-ui, -apple-system, sans-serif"
+    font-size="240"
+    font-weight="900"
+    text-anchor="middle"
+    fill="#052e16"
+    letter-spacing="-6"
+  >D</text>
+</svg>

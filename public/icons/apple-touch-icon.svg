@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180">
+  <!--
+    Apple touch icon – 180×180 reference size.
+    iOS clips to a rounded rectangle automatically, so no need to apply
+    rounded corners here; a full-bleed background is correct.
+  -->
+  <rect width="180" height="180" fill="#10b981"/>
+  <text
+    x="91"
+    y="132"
+    font-family="Arial Black, Arial, system-ui, -apple-system, sans-serif"
+    font-size="108"
+    font-weight="900"
+    text-anchor="middle"
+    fill="#052e16"
+    letter-spacing="-3"
+  >D</text>
+</svg>
