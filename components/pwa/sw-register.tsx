@@ -201,28 +201,50 @@ function UpdateBanner({
 }) {
   const [dismissed, setDismissed] = useState(false);
 
+  useEffect(() => {
+    if (!available) setDismissed(false);
+  }, [available]);
+
   if (!available || dismissed) return null;
 
   return (
-    <div className="fixed bottom-24 md:bottom-6 inset-x-0 z-[99] flex justify-center px-4 pointer-events-none">
-      <div className="pointer-events-auto flex items-center gap-3 bg-card text-card-foreground ring-1 ring-border rounded-2xl px-4 py-3 shadow-2xl max-w-sm w-full">
-        <RefreshCw size={16} className="text-emerald-400 shrink-0" strokeWidth={2} />
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-foreground">Update available</p>
-          <p className="text-xs text-muted-foreground">A new version of the app is ready.</p>
+    <div className="fixed inset-x-3 top-[calc(0.75rem+env(safe-area-inset-top))] z-[110] flex justify-center pointer-events-none md:inset-x-auto md:right-4 md:top-4">
+      <div className="pointer-events-auto w-full max-w-[420px] overflow-hidden rounded-2xl bg-card/95 text-card-foreground ring-1 ring-border shadow-2xl backdrop-blur md:w-[380px]">
+        <div className="flex items-start gap-3 p-3.5">
+          <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary ring-1 ring-primary/15">
+            <RefreshCw size={16} strokeWidth={2.25} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold leading-5 text-foreground">New version available</p>
+            <p className="mt-0.5 text-xs leading-4 text-muted-foreground">
+              A newer version of Budget Tracker is ready.
+            </p>
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                onClick={onUpdate}
+                className="min-h-10 flex-1 rounded-xl bg-primary px-3 text-xs font-semibold text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              >
+                Update Now
+              </button>
+              <button
+                type="button"
+                onClick={() => setDismissed(true)}
+                className="min-h-10 flex-1 rounded-xl border border-border bg-background/80 px-3 text-xs font-semibold text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              >
+                Later
+              </button>
+            </div>
+          </div>
+          <button
+            type="button"
+            aria-label="Dismiss update notification"
+            onClick={() => setDismissed(true)}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          >
+            <X size={15} />
+          </button>
         </div>
-        <button
-          onClick={onUpdate}
-          className="shrink-0 px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-zinc-950 text-xs font-semibold transition-colors"
-        >
-          Update
-        </button>
-        <button
-          onClick={() => setDismissed(true)}
-          className="shrink-0 w-6 h-6 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <X size={14} />
-        </button>
       </div>
     </div>
   );

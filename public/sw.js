@@ -11,7 +11,7 @@
  * Bump CACHE_VERSION whenever you want users to pick up a fresh cache.
  */
 
-const CACHE_VERSION = 'v4';
+const CACHE_VERSION = 'v5';
 const CACHE_NAME    = `dezu-budget-${CACHE_VERSION}`;
 
 /** URLs cached on SW install (app shell). */
@@ -35,9 +35,7 @@ const AUTH_PATHS = [
 // ─── Install ──────────────────────────────────────────────────────────────────
 
 self.addEventListener('install', (event) => {
-  // Take control immediately; don't wait for old SW to die.
-  self.skipWaiting();
-
+  // Install quietly. The app UI asks the user before activating this worker.
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) =>
       // Use allSettled so a single bad URL doesn't abort the whole install.
