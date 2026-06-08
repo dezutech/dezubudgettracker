@@ -495,7 +495,6 @@ function AddWalletModal({
         name:       name.trim(),
         type,
         balance:    isDebtType ? -Math.abs(bal) : bal,
-        currency,
         color,
         icon,
         logo_url:   logoUrl,
@@ -676,7 +675,6 @@ function EditWalletModal({
   onClose: () => void;
   onSaved: (wallet: WalletDisplay) => void;
 }) {
-  const { symbol } = useCurrency();
   const [name, setName] = useState("");
   const [type, setType] = useState<WalletType>("Cash");
   const [balance, setBalance] = useState("");
