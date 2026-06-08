@@ -192,6 +192,10 @@ function effectiveStatus(debt: SupabaseDebt): DebtStatus {
   return effectiveDebtStatus(toLocalDebt(debt));
 }
 
+function isMissingColumnError(error: { message?: string } | null | undefined, column: string) {
+  return !!error?.message?.toLowerCase().includes(`column ${column.toLowerCase()} does not exist`);
+}
+
 function dueLabel(debt: SupabaseDebt) {
   if (effectiveStatus(debt) === "paid") return "Paid";
   const diff = daysUntil(debt.due_date);
@@ -838,7 +842,7 @@ export function DebtsView() {
       if (overdueError) setActionError(overdueError);
 
       const supabase = createClient();
-      const [debtResult, walletResult, txResult] = await Promise.all([
+      const [initialDebtResult, walletResult, initialTxResult] = await Promise.all([
         loggedSupabase(
           "debts",
           supabase
@@ -867,16 +871,44 @@ export function DebtsView() {
             .not("debt_id", "is", null)
         ),
       ]);
+      let debtResult: {
+        data: unknown[] | null;
+        error: { message?: string } | null;
+      } = initialDebtResult;
+      let txResult: {
+        data: unknown[] | null;
+        error: { message?: string } | null;
+      } = initialTxResult;
+
+      if (isMissingColumnError(debtResult.error, "debts.wallet_id")) {
+        debtResult = await loggedSupabase(
+          "debts without wallet column",
+          supabase
+            .from("debts")
+            .select("id,user_id,person_name,debt_type,original_amount,remaining_balance,borrowed_date,due_date,notes,status")
+            .eq("user_id", user.id)
+            .eq("is_deleted", false)
+            .order("due_date", { ascending: true, nullsFirst: false })
+        );
+      }
+
+      if (isMissingColumnError(txResult.error, "transactions.debt_id")) {
+        txResult = { data: [], error: null } as typeof txResult;
+      }
+
       if (!isCurrent()) return;
       const firstError = debtResult.error ?? walletResult.error ?? txResult.error;
       if (firstError) {
-        setLoadError(firstError.message);
+        setLoadError(firstError.message ?? "Failed to load debts.");
         setDebts([]);
         setWallets([]);
         setLinkedCounts({});
         return;
       }
-      setDebts((debtResult.data ?? []) as SupabaseDebt[]);
+      setDebts(((debtResult.data ?? []) as Array<Omit<SupabaseDebt, "wallet_id"> & { wallet_id?: string | null }>).map((debt) => ({
+        ...debt,
+        wallet_id: debt.wallet_id ?? null,
+      })));
       setWallets((walletResult.data ?? []) as SupabaseWallet[]);
       setLinkedCounts(((txResult.data ?? []) as Array<{ debt_id: string | null }>).reduce<Record<string, number>>((acc, tx) => {
         if (tx.debt_id) acc[tx.debt_id] = (acc[tx.debt_id] ?? 0) + 1;
