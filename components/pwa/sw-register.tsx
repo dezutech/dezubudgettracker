@@ -110,9 +110,12 @@ function useInstallPrompt() {
 
   useEffect(() => {
     // Already running in standalone = already installed.
+    const iosStandalone =
+      "standalone" in window.navigator &&
+      (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
     const standalone =
       window.matchMedia("(display-mode: standalone)").matches ||
-      ("standalone" in navigator && Boolean((navigator as Navigator & { standalone?: boolean }).standalone)) ||
+      iosStandalone ||
       window.localStorage.getItem("pwa-installed") === "1";
 
     if (standalone) {

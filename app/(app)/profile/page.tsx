@@ -53,12 +53,13 @@ function Avatar({
 }
 
 const AVATAR_BUCKET = "avatars";
-const MAX_AVATAR_SIZE = 2 * 1024 * 1024;
+const MAX_AVATAR_SIZE_MB = 5;
+const MAX_AVATAR_SIZE = MAX_AVATAR_SIZE_MB * 1024 * 1024;
 const ACCEPTED_AVATAR_TYPES = ["image/png", "image/jpeg", "image/webp", "image/svg+xml"];
 
 function validateImageFile(file: File) {
   if (!ACCEPTED_AVATAR_TYPES.includes(file.type)) return "Upload a JPG, PNG, WebP, or safe SVG image.";
-  if (file.size > MAX_AVATAR_SIZE) return "Profile picture must be 2MB or smaller.";
+  if (file.size > MAX_AVATAR_SIZE) return `Profile picture must be ${MAX_AVATAR_SIZE_MB}MB or smaller.`;
   return "";
 }
 
@@ -181,7 +182,7 @@ function ProfilePictureUpload({
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold text-zinc-100">Upload Image</p>
           <p className="mt-1 text-xs leading-relaxed text-zinc-500">
-            Tap to upload on mobile, or drag and drop on desktop. JPG, PNG, WebP, or safe SVG. Max 2MB.
+            Tap to upload on mobile, or drag and drop on desktop. JPG, PNG, WebP, or safe SVG. Max {MAX_AVATAR_SIZE_MB}MB.
           </p>
         </div>
         <div className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-400 sm:flex">
