@@ -246,23 +246,34 @@ async function syncRecurringMonthlyBillsForDashboard(userId: string, month: stri
   const supabase = createClient();
   const { end } = monthRange(month);
 
-  const { data: recurringRows, error: recurringError } = await loggedSupabase(
-    "dashboard recurring bills source",
-    supabase
-      .from("recurring_transactions")
-      .select("id,wallet_id,category_id,title,amount,transaction_type,frequency,next_run_date")
-      .eq("user_id", userId)
-      .eq("is_deleted", false)
-      .eq("is_active", true)
-      .eq("transaction_type", "expense")
-      .eq("frequency", "monthly")
-      .lte("next_run_date", end)
-  );
+  const [
+    { data: recurringRows, error: recurringError },
+    { data: walletRows },
+    { data: categoryRows },
+  ] = await Promise.all([
+    loggedSupabase(
+      "dashboard recurring bills source",
+      supabase
+        .from("recurring_transactions")
+        .select("id,wallet_id,category_id,title,amount,transaction_type,frequency,next_run_date")
+        .eq("user_id", userId)
+        .eq("is_deleted", false)
+        .eq("is_active", true)
+        .eq("transaction_type", "expense")
+        .eq("frequency", "monthly")
+        .lte("next_run_date", end)
+    ),
+    supabase.from("wallets").select("id").eq("user_id", userId).eq("is_deleted", false),
+    supabase.from("categories").select("id").eq("user_id", userId).eq("is_deleted", false),
+  ]);
 
   if (recurringError) return recurringError.message;
 
   const recurring = (recurringRows ?? []) as SupabaseRecurringRow[];
   if (recurring.length === 0) return "";
+
+  const validWalletIds = new Set((walletRows ?? []).map((w) => w.id as string));
+  const validCategoryIds = new Set((categoryRows ?? []).map((c) => c.id as string));
 
   const { data: existingRows, error: existingError } = await loggedSupabase(
     "dashboard existing recurring bills",
@@ -295,6 +306,9 @@ async function syncRecurringMonthlyBillsForDashboard(userId: string, month: stri
       recurring_id: string;
     }> = [];
 
+    const walletId = item.wallet_id && validWalletIds.has(item.wallet_id) ? item.wallet_id : null;
+    const categoryId = item.category_id && validCategoryIds.has(item.category_id) ? item.category_id : null;
+
     let dueDate = item.next_run_date;
     let guard = 0;
     while (dueDate <= end && guard < 12) {
@@ -306,8 +320,8 @@ async function syncRecurringMonthlyBillsForDashboard(userId: string, month: stri
           title: item.title,
           amount: Number(item.amount),
           due_date: dueDate,
-          category_id: item.category_id,
-          wallet_id: item.wallet_id,
+          category_id: categoryId,
+          wallet_id: walletId,
           status: dueDate > todayIso() ? "scheduled" : "unpaid",
           notes: "Generated from recurring transaction",
           is_recurring: true,
