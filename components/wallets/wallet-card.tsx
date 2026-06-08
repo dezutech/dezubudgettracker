@@ -11,6 +11,7 @@ import {
   ArrowUpRight,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { CSSProperties } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import type { LucideIcon } from "lucide-react";
@@ -145,7 +146,9 @@ export function WalletCard({
 }: WalletCardProps) {
   const { currency, formatCurrency } = useCurrency();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState({ top: 0, right: 0 });
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const walletType = normalizeType(wallet.type);
   const { icon: Icon, label } = typeConfig[walletType];
   const colors = walletAccent(wallet.color, walletType);
@@ -161,7 +164,11 @@ export function WalletCard({
     if (!menuOpen) return;
 
     function handlePointerDown(event: MouseEvent) {
-      if (!menuRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (
+        !menuRef.current?.contains(target) &&
+        !triggerRef.current?.contains(target)
+      ) {
         setMenuOpen(false);
       }
     }
@@ -193,16 +200,27 @@ export function WalletCard({
               {label}
             </span>
           </div>
-          <div className="relative" ref={menuRef}>
+          <div className="relative">
             <button
-              onClick={() => setMenuOpen((open) => !open)}
+              ref={triggerRef}
+              onClick={() => {
+                if (triggerRef.current) {
+                  const rect = triggerRef.current.getBoundingClientRect();
+                  setMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+                }
+                setMenuOpen((open) => !open);
+              }}
               className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-card/70 hover:text-foreground sm:h-7 sm:w-7"
               aria-label={`Open ${wallet.name} wallet actions`}
             >
               <MoreHorizontal size={15} />
             </button>
-            {menuOpen && (
-              <div className="absolute right-0 top-8 z-20 w-40 overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-xl">
+            {menuOpen && createPortal(
+              <div
+                ref={menuRef}
+                style={{ position: "fixed", top: menuPos.top, right: menuPos.right, zIndex: 9999 }}
+                className="w-40 overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-xl"
+              >
                 <button
                   onClick={() => {
                     setMenuOpen(false);
@@ -231,7 +249,8 @@ export function WalletCard({
                 >
                   Delete Wallet
                 </button>
-              </div>
+              </div>,
+              document.body
             )}
           </div>
         </div>
