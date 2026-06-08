@@ -137,6 +137,9 @@ export interface Database {
           wallet_id: string;
           destination_wallet_id: string | null;
           goal_id: string | null;
+          debt_id: string | null;
+          debt_type: DebtType | null;
+          person_name: string | null;
           category_id: string | null;
           amount: number;
           transaction_type: TransactionType;
@@ -148,6 +151,9 @@ export interface Database {
           wallet_id: string;
           destination_wallet_id?: string | null;
           goal_id?: string | null;
+          debt_id?: string | null;
+          debt_type?: DebtType | null;
+          person_name?: string | null;
           category_id?: string | null;
           amount: number;
           transaction_type: TransactionType;
@@ -159,6 +165,9 @@ export interface Database {
           wallet_id?: string;
           destination_wallet_id?: string | null;
           goal_id?: string | null;
+          debt_id?: string | null;
+          debt_type?: DebtType | null;
+          person_name?: string | null;
           category_id?: string | null;
           amount?: number;
           transaction_type?: TransactionType;
@@ -301,6 +310,7 @@ export interface Database {
         Row: CommonRow & {
           person_name: string;
           debt_type: DebtType;
+          wallet_id: string | null;
           original_amount: number;
           remaining_balance: number;
           borrowed_date: string;
@@ -311,6 +321,7 @@ export interface Database {
         Insert: CommonInsert & {
           person_name: string;
           debt_type: DebtType;
+          wallet_id?: string | null;
           original_amount: number;
           remaining_balance?: number;
           borrowed_date: string;
@@ -321,6 +332,7 @@ export interface Database {
         Update: CommonUpdate & {
           person_name?: string;
           debt_type?: DebtType;
+          wallet_id?: string | null;
           original_amount?: number;
           remaining_balance?: number;
           borrowed_date?: string;

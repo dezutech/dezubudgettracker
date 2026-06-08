@@ -85,6 +85,11 @@ class DesuBudgetDB extends Dexie {
     this.version(7).stores({
       debts: "++id, userId, debtType, status, dueDate, isDeleted, [userId+status], [userId+debtType], [userId+dueDate]",
     });
+
+    this.version(8).stores({
+      transactions: "++id, userId, walletId, categoryId, type, date, syncId, debtId, [userId+date], [userId+type+date], [userId+debtId], [walletId+date], [type+date]",
+      debts: "++id, userId, debtType, walletId, status, dueDate, isDeleted, [userId+status], [userId+debtType], [userId+dueDate]",
+    });
   }
 }
 

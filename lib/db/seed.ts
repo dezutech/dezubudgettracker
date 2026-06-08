@@ -47,7 +47,7 @@ export async function seedDatabase(userId = OFFLINE_USER_ID): Promise<void> {
 export async function resetDatabase(userId = OFFLINE_USER_ID): Promise<void> {
   await db.transaction(
     "rw",
-    [db.categories, db.wallets, db.transactions, db.budgets, db.syncQueue, db.recurringTransactions, db.goals],
+    [db.categories, db.wallets, db.transactions, db.budgets, db.syncQueue, db.recurringTransactions, db.goals, db.debts],
     async () => {
       await Promise.all([
         db.categories.where("userId").equals(userId).delete(),
@@ -57,6 +57,7 @@ export async function resetDatabase(userId = OFFLINE_USER_ID): Promise<void> {
         db.syncQueue.where("userId").equals(userId).delete(),
         db.recurringTransactions.where("userId").equals(userId).delete(),
         db.goals.where("userId").equals(userId).delete(),
+        db.debts.where("userId").equals(userId).delete(),
       ]);
     }
   );

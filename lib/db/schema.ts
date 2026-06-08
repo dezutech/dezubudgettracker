@@ -36,6 +36,9 @@ export type DbTransaction = {
   categoryId: number;
   toWalletId?: number;  // transfer destination
   goalId?: number;
+  debtId?: number;
+  debtType?: DebtType;
+  personName?: string;
   type: TransactionType;
   amount: number;       // always positive
   date: string;         // ISO date "2025-05-28"
@@ -142,6 +145,7 @@ export type DbDebt = {
   userId: string;
   personName: string;
   debtType: DebtType;
+  walletId: number | null;
   originalAmount: number;
   remainingBalance: number;
   borrowedDate: string;

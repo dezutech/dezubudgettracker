@@ -23,13 +23,20 @@ import { loggedSupabase } from "@/lib/supabase/query";
 import {
   addDebtPayment,
   archiveDebt,
+  createCategory,
   createDebt,
+  createTransaction,
   effectiveDebtStatus,
+  getCategories,
   getDebts,
-  markDebtPaid,
+  getNextSortOrder,
+  getTransactions,
+  getWallets,
   updateDebt,
   updateOverdueLocalDebts,
+  type DbCategory,
   type DbDebt,
+  type DbWallet,
   type DebtStatus,
   type DebtType,
 } from "@/lib/db";
@@ -42,12 +49,27 @@ type SupabaseDebt = {
   user_id: string;
   person_name: string;
   debt_type: DebtType;
+  wallet_id: string | null;
   original_amount: number | string;
   remaining_balance: number | string;
   borrowed_date: string;
   due_date: string | null;
   notes: string | null;
   status: DebtStatus;
+};
+
+type SupabaseWallet = {
+  id: string;
+  name: string;
+  balance: number | string;
+};
+
+type SupabaseCategory = {
+  id: string;
+  name: string;
+  type: "income" | "expense";
+  icon: string | null;
+  color: string | null;
 };
 
 type DebtFormState =
@@ -81,6 +103,7 @@ function localDebtToSupabase(debt: DbDebt): SupabaseDebt {
     user_id: debt.userId,
     person_name: debt.personName,
     debt_type: debt.debtType,
+    wallet_id: debt.walletId != null ? String(debt.walletId) : null,
     original_amount: debt.originalAmount,
     remaining_balance: debt.remainingBalance,
     borrowed_date: debt.borrowedDate,
@@ -88,6 +111,73 @@ function localDebtToSupabase(debt: DbDebt): SupabaseDebt {
     notes: debt.notes ?? null,
     status: debt.status,
   };
+}
+
+function localWalletToSupabase(wallet: DbWallet): SupabaseWallet {
+  return { id: String(wallet.id), name: wallet.name, balance: wallet.balance };
+}
+
+function localCategoryToSupabase(category: DbCategory): SupabaseCategory {
+  return {
+    id: String(category.id),
+    name: category.name,
+    type: category.type === "both" ? "expense" : category.type,
+    icon: category.icon,
+    color: category.color,
+  };
+}
+
+const DEBT_CATEGORY_META: Record<string, { type: "income" | "expense"; icon: string; color: string }> = {
+  "Borrowed Money": { type: "income", icon: "HandCoins", color: "sky" },
+  "Money Lent": { type: "expense", icon: "HandCoins", color: "amber" },
+  "Debt Payment": { type: "expense", icon: "ArrowUpRight", color: "rose" },
+  "Debt Collection": { type: "income", icon: "ArrowDownLeft", color: "emerald" },
+};
+
+async function ensureLocalDebtCategory(name: keyof typeof DEBT_CATEGORY_META, userId = OFFLINE_USER_ID) {
+  const meta = DEBT_CATEGORY_META[name];
+  const existing = (await getCategories(userId)).find((category) => category.name === name && category.type === meta.type);
+  if (existing) return existing.id;
+  const sortOrder = await getNextSortOrder();
+  return createCategory({
+    userId,
+    name,
+    type: meta.type,
+    icon: meta.icon,
+    color: meta.color,
+    isDefault: true,
+    sortOrder,
+  });
+}
+
+async function ensureSupabaseDebtCategory(name: keyof typeof DEBT_CATEGORY_META, userId: string) {
+  const meta = DEBT_CATEGORY_META[name];
+  const supabase = createClient();
+  const { data: existing, error: readError } = await supabase
+    .from("categories")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("name", name)
+    .eq("type", meta.type)
+    .eq("is_deleted", false)
+    .maybeSingle();
+  if (readError) throw new Error(readError.message);
+  if (existing?.id) return existing.id as string;
+
+  const { data, error } = await supabase
+    .from("categories")
+    .insert({
+      user_id: userId,
+      name,
+      type: meta.type,
+      icon: meta.icon,
+      color: meta.color,
+      is_default: true,
+    })
+    .select("id")
+    .single();
+  if (error) throw new Error(error.message);
+  return data.id as string;
 }
 
 function toLocalDebt(debt: SupabaseDebt): Pick<DbDebt, "status" | "remainingBalance" | "dueDate"> {
@@ -165,12 +255,16 @@ function SummaryCard({
 
 function DebtModal({
   state,
+  wallets,
+  linkedTransactionCount,
   isOffline,
   userId,
   onClose,
   onSaved,
 }: {
   state: Exclude<DebtFormState, { mode: "closed" }>;
+  wallets: SupabaseWallet[];
+  linkedTransactionCount: number;
   isOffline: boolean;
   userId: string | null;
   onClose: () => void;
@@ -180,6 +274,7 @@ function DebtModal({
   const initial = isEdit ? state.debt : null;
   const [personName, setPersonName] = useState(initial?.person_name ?? "");
   const [debtType, setDebtType] = useState<DebtType>(initial?.debt_type ?? "i_owe");
+  const [walletId, setWalletId] = useState(initial?.wallet_id ?? "");
   const [originalAmount, setOriginalAmount] = useState(initial ? String(initial.original_amount) : "");
   const [remainingBalance, setRemainingBalance] = useState(initial ? String(initial.remaining_balance) : "");
   const [borrowedDate, setBorrowedDate] = useState(initial?.borrowed_date ?? todayIso());
@@ -207,6 +302,7 @@ function DebtModal({
       return;
     }
     if (!borrowedDate) { setError("Borrowed or lent date is required."); return; }
+    if (!isEdit && !walletId) { setError("Select the wallet that received or sent the money."); return; }
 
     const nextStatus: DebtStatus = parsedRemaining <= 0
       ? "paid"
@@ -221,6 +317,7 @@ function DebtModal({
           userId: OFFLINE_USER_ID,
           personName: personName.trim(),
           debtType,
+          walletId: walletId ? Number(walletId) : null,
           originalAmount: parsedOriginal,
           remainingBalance: parsedRemaining,
           borrowedDate,
@@ -230,7 +327,23 @@ function DebtModal({
           isDeleted: false,
         };
         if (isEdit) await updateDebt(Number(state.debt.id), payload);
-        else await createDebt(payload);
+        else {
+          const debtId = await createDebt(payload);
+          const categoryId = await ensureLocalDebtCategory(debtType === "i_owe" ? "Borrowed Money" : "Money Lent");
+          await createTransaction({
+            userId: OFFLINE_USER_ID,
+            walletId: Number(walletId),
+            categoryId,
+            type: debtType === "i_owe" ? "income" : "expense",
+            amount: parsedOriginal,
+            date: borrowedDate,
+            name: debtType === "i_owe" ? `Borrowed money from ${personName.trim()}` : `Money lent to ${personName.trim()}`,
+            notes: notes.trim() || undefined,
+            debtId,
+            debtType,
+            personName: personName.trim(),
+          });
+        }
         onSaved();
         onClose();
         return;
@@ -242,6 +355,7 @@ function DebtModal({
         user_id: userId,
         person_name: personName.trim(),
         debt_type: debtType,
+        wallet_id: walletId || null,
         original_amount: parsedOriginal,
         remaining_balance: parsedRemaining,
         borrowed_date: borrowedDate,
@@ -250,11 +364,60 @@ function DebtModal({
         status: nextStatus,
       };
 
-      const result = isEdit
-        ? await supabase.from("debts").update(payload).eq("id", state.debt.id).eq("user_id", userId)
-        : await supabase.from("debts").insert(payload);
+      if (isEdit) {
+        const result = await supabase.from("debts").update(payload).eq("id", state.debt.id).eq("user_id", userId);
+        if (result.error) { setError(result.error.message); return; }
+      } else {
+        const categoryId = await ensureSupabaseDebtCategory(debtType === "i_owe" ? "Borrowed Money" : "Money Lent", userId);
+        const { data: walletRow, error: walletReadError } = await supabase
+          .from("wallets")
+          .select("balance")
+          .eq("id", walletId)
+          .eq("user_id", userId)
+          .maybeSingle();
+        if (walletReadError) { setError(walletReadError.message); return; }
+        if (!walletRow) { setError("Selected wallet was not found."); return; }
 
-      if (result.error) { setError(result.error.message); return; }
+        const { data: debtRow, error: debtError } = await supabase
+          .from("debts")
+          .insert(payload)
+          .select("id")
+          .single();
+        if (debtError) { setError(debtError.message); return; }
+
+        const previousBalance = Number(walletRow.balance ?? 0);
+        const nextBalance = previousBalance + (debtType === "i_owe" ? parsedOriginal : -parsedOriginal);
+        const { error: walletUpdateError } = await supabase
+          .from("wallets")
+          .update({ balance: nextBalance })
+          .eq("id", walletId)
+          .eq("user_id", userId);
+        if (walletUpdateError) {
+          await supabase.from("debts").delete().eq("id", debtRow.id).eq("user_id", userId);
+          setError(walletUpdateError.message);
+          return;
+        }
+
+        const { error: txError } = await supabase.from("transactions").insert({
+          user_id: userId,
+          wallet_id: walletId,
+          category_id: categoryId,
+          amount: parsedOriginal,
+          transaction_type: debtType === "i_owe" ? "income" : "expense",
+          description: debtType === "i_owe" ? `Borrowed money from ${personName.trim()}` : `Money lent to ${personName.trim()}`,
+          notes: notes.trim() || null,
+          transaction_date: borrowedDate,
+          debt_id: debtRow.id,
+          debt_type: debtType,
+          person_name: personName.trim(),
+        });
+        if (txError) {
+          await supabase.from("wallets").update({ balance: previousBalance }).eq("id", walletId).eq("user_id", userId);
+          await supabase.from("debts").delete().eq("id", debtRow.id).eq("user_id", userId);
+          setError(txError.message);
+          return;
+        }
+      }
       onSaved();
       onClose();
     } catch (err) {
@@ -276,6 +439,12 @@ function DebtModal({
         </div>
 
         <div className="dezu-modal-body flex flex-col gap-4 px-5 py-5">
+          {isEdit && linkedTransactionCount > 0 && (
+            <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-300">
+              This debt has {linkedTransactionCount} linked transaction{linkedTransactionCount === 1 ? "" : "s"}. Editing details will not rewrite existing transaction history.
+            </div>
+          )}
+
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="flex flex-col gap-1.5 sm:col-span-2">
               <label className="text-xs font-medium text-muted-foreground">Person name</label>
@@ -287,6 +456,18 @@ function DebtModal({
               <select value={debtType} onChange={(e) => setDebtType(e.target.value as DebtType)} className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring">
                 <option value="i_owe">I Owe</option>
                 <option value="owes_me">Owes Me</option>
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium text-muted-foreground">
+                {debtType === "i_owe" ? "Receiving wallet" : "Lending wallet"}
+              </label>
+              <select value={walletId} onChange={(e) => setWalletId(e.target.value)} className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring">
+                <option value="">Select wallet</option>
+                {wallets.map((wallet) => (
+                  <option key={wallet.id} value={wallet.id}>{wallet.name}</option>
+                ))}
               </select>
             </div>
 
@@ -337,12 +518,14 @@ function DebtModal({
 
 function PaymentModal({
   debt,
+  wallets,
   isOffline,
   userId,
   onClose,
   onSaved,
 }: {
   debt: SupabaseDebt;
+  wallets: SupabaseWallet[];
   isOffline: boolean;
   userId: string | null;
   onClose: () => void;
@@ -350,6 +533,7 @@ function PaymentModal({
 }) {
   const { formatCurrency } = useCurrency();
   const [amount, setAmount] = useState("");
+  const [walletId, setWalletId] = useState(debt.wallet_id ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const remaining = Number(debt.remaining_balance);
@@ -365,10 +549,28 @@ function PaymentModal({
       setError("Payment cannot exceed the remaining balance.");
       return;
     }
+    if (!walletId) {
+      setError(debt.debt_type === "i_owe" ? "Select the payment wallet." : "Select the receiving wallet.");
+      return;
+    }
     setSaving(true);
     try {
       if (isOffline) {
+        const categoryId = await ensureLocalDebtCategory(debt.debt_type === "i_owe" ? "Debt Payment" : "Debt Collection");
         await addDebtPayment(Number(debt.id), parsed, OFFLINE_USER_ID);
+        await createTransaction({
+          userId: OFFLINE_USER_ID,
+          walletId: Number(walletId),
+          categoryId,
+          type: debt.debt_type === "i_owe" ? "expense" : "income",
+          amount: parsed,
+          date: todayIso(),
+          name: debt.debt_type === "i_owe" ? `Debt payment to ${debt.person_name}` : `Debt collection from ${debt.person_name}`,
+          notes: debt.notes ?? undefined,
+          debtId: Number(debt.id),
+          debtType: debt.debt_type,
+          personName: debt.person_name,
+        });
         onSaved();
         onClose();
         return;
@@ -381,12 +583,55 @@ function PaymentModal({
         ? "overdue"
         : "active";
       const supabase = createClient();
+      const categoryId = await ensureSupabaseDebtCategory(debt.debt_type === "i_owe" ? "Debt Payment" : "Debt Collection", userId);
+      const { data: walletRow, error: walletReadError } = await supabase
+        .from("wallets")
+        .select("balance")
+        .eq("id", walletId)
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (walletReadError) { setError(walletReadError.message); return; }
+      if (!walletRow) { setError("Selected wallet was not found."); return; }
+
       const { error: updateError } = await supabase
         .from("debts")
         .update({ remaining_balance: nextRemaining, status: nextStatus })
         .eq("id", debt.id)
         .eq("user_id", userId);
       if (updateError) { setError(updateError.message); return; }
+
+      const previousBalance = Number(walletRow.balance ?? 0);
+      const nextBalance = previousBalance + (debt.debt_type === "i_owe" ? -parsed : parsed);
+      const { error: walletUpdateError } = await supabase
+        .from("wallets")
+        .update({ balance: nextBalance })
+        .eq("id", walletId)
+        .eq("user_id", userId);
+      if (walletUpdateError) {
+        await supabase.from("debts").update({ remaining_balance: remaining, status: debt.status }).eq("id", debt.id).eq("user_id", userId);
+        setError(walletUpdateError.message);
+        return;
+      }
+
+      const { error: txError } = await supabase.from("transactions").insert({
+        user_id: userId,
+        wallet_id: walletId,
+        category_id: categoryId,
+        amount: parsed,
+        transaction_type: debt.debt_type === "i_owe" ? "expense" : "income",
+        description: debt.debt_type === "i_owe" ? `Debt payment to ${debt.person_name}` : `Debt collection from ${debt.person_name}`,
+        notes: debt.notes,
+        transaction_date: todayIso(),
+        debt_id: debt.id,
+        debt_type: debt.debt_type,
+        person_name: debt.person_name,
+      });
+      if (txError) {
+        await supabase.from("wallets").update({ balance: previousBalance }).eq("id", walletId).eq("user_id", userId);
+        await supabase.from("debts").update({ remaining_balance: remaining, status: debt.status }).eq("id", debt.id).eq("user_id", userId);
+        setError(txError.message);
+        return;
+      }
       onSaved();
       onClose();
     } catch (err) {
@@ -409,8 +654,28 @@ function PaymentModal({
           </p>
         </div>
         <div className="px-5 py-5">
-          <label className="text-xs font-medium text-muted-foreground">Amount</label>
-          <Input type="number" min="0.01" max={remaining} step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} className="mt-1.5 h-10" placeholder="0.00" />
+          <div className="flex flex-col gap-3">
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Amount</label>
+              <div className="mt-1.5 flex gap-2">
+                <Input type="number" min="0.01" max={remaining} step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} className="h-10" placeholder="0.00" />
+                <button type="button" onClick={() => setAmount(String(remaining))} className="shrink-0 rounded-lg border border-border bg-background px-3 text-xs font-semibold text-foreground transition-colors hover:bg-muted">
+                  Full
+                </button>
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">
+                {debt.debt_type === "i_owe" ? "Payment wallet" : "Receiving wallet"}
+              </label>
+              <select value={walletId} onChange={(e) => setWalletId(e.target.value)} className="mt-1.5 h-10 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring">
+                <option value="">Select wallet</option>
+                {wallets.map((wallet) => (
+                  <option key={wallet.id} value={wallet.id}>{wallet.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
           {error && <p className="mt-3 rounded-lg bg-rose-500/10 px-3 py-2 text-xs text-rose-400">{error}</p>}
         </div>
         <div className="flex items-center gap-2 border-t border-border px-5 py-4">
@@ -521,6 +786,8 @@ export function DebtsView() {
   const { formatCurrency } = useCurrency();
   const { user, loading: authLoading, isLoggingOut, isGuest } = useAuth();
   const [debts, setDebts] = useState<SupabaseDebt[]>([]);
+  const [wallets, setWallets] = useState<SupabaseWallet[]>([]);
+  const [linkedCounts, setLinkedCounts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
@@ -545,14 +812,25 @@ export function DebtsView() {
       if (authLoading || isLoggingOut) return;
       if (isGuest) {
         await updateOverdueLocalDebts(OFFLINE_USER_ID);
-        const localDebts = await getDebts(OFFLINE_USER_ID);
+        const [localDebts, localWallets, localTransactions] = await Promise.all([
+          getDebts(OFFLINE_USER_ID),
+          getWallets(OFFLINE_USER_ID),
+          getTransactions({ userId: OFFLINE_USER_ID }),
+        ]);
         if (!isCurrent()) return;
         setDebts(localDebts.map(localDebtToSupabase));
+        setWallets(localWallets.map(localWalletToSupabase));
+        setLinkedCounts(localTransactions.reduce<Record<string, number>>((acc, tx) => {
+          if (tx.debtId != null) acc[String(tx.debtId)] = (acc[String(tx.debtId)] ?? 0) + 1;
+          return acc;
+        }, {}));
         return;
       }
       if (!user?.id) {
         if (!isCurrent()) return;
         setDebts([]);
+        setWallets([]);
+        setLinkedCounts({});
         return;
       }
 
@@ -560,22 +838,50 @@ export function DebtsView() {
       if (overdueError) setActionError(overdueError);
 
       const supabase = createClient();
-      const { data, error } = await loggedSupabase(
-        "debts",
-        supabase
-          .from("debts")
-          .select("id,user_id,person_name,debt_type,original_amount,remaining_balance,borrowed_date,due_date,notes,status")
-          .eq("user_id", user.id)
-          .eq("is_deleted", false)
-          .order("due_date", { ascending: true, nullsFirst: false })
-      );
+      const [debtResult, walletResult, txResult] = await Promise.all([
+        loggedSupabase(
+          "debts",
+          supabase
+            .from("debts")
+            .select("id,user_id,person_name,debt_type,wallet_id,original_amount,remaining_balance,borrowed_date,due_date,notes,status")
+            .eq("user_id", user.id)
+            .eq("is_deleted", false)
+            .order("due_date", { ascending: true, nullsFirst: false })
+        ),
+        loggedSupabase(
+          "debt wallets",
+          supabase
+            .from("wallets")
+            .select("id,name,balance")
+            .eq("user_id", user.id)
+            .eq("is_deleted", false)
+            .order("created_at", { ascending: true })
+        ),
+        loggedSupabase(
+          "debt linked transactions",
+          supabase
+            .from("transactions")
+            .select("debt_id")
+            .eq("user_id", user.id)
+            .eq("is_deleted", false)
+            .not("debt_id", "is", null)
+        ),
+      ]);
       if (!isCurrent()) return;
-      if (error) {
-        setLoadError(error.message);
+      const firstError = debtResult.error ?? walletResult.error ?? txResult.error;
+      if (firstError) {
+        setLoadError(firstError.message);
         setDebts([]);
+        setWallets([]);
+        setLinkedCounts({});
         return;
       }
-      setDebts((data ?? []) as SupabaseDebt[]);
+      setDebts((debtResult.data ?? []) as SupabaseDebt[]);
+      setWallets((walletResult.data ?? []) as SupabaseWallet[]);
+      setLinkedCounts(((txResult.data ?? []) as Array<{ debt_id: string | null }>).reduce<Record<string, number>>((acc, tx) => {
+        if (tx.debt_id) acc[tx.debt_id] = (acc[tx.debt_id] ?? 0) + 1;
+        return acc;
+      }, {}));
     } catch (error) {
       if (!isCurrent()) return;
       setLoadError(error instanceof Error ? error.message : "Failed to load debts.");
@@ -678,31 +984,6 @@ export function DebtsView() {
     }
   }
 
-  async function handleMarkPaid(debt: SupabaseDebt) {
-    setPayingId(debt.id);
-    setActionError("");
-    try {
-      if (isGuest) {
-        await markDebtPaid(Number(debt.id), OFFLINE_USER_ID);
-        void loadDebts(undefined, { silent: true });
-        return;
-      }
-      if (!user?.id) { setActionError("Please sign in to update debts."); return; }
-      const supabase = createClient();
-      const { error } = await supabase
-        .from("debts")
-        .update({ remaining_balance: 0, status: "paid" })
-        .eq("id", debt.id)
-        .eq("user_id", user.id);
-      if (error) { setActionError(error.message); return; }
-      void loadDebts(undefined, { silent: true });
-    } catch (error) {
-      setActionError(error instanceof Error ? error.message : "Failed to mark debt paid.");
-    } finally {
-      setPayingId(null);
-    }
-  }
-
   const tabs: Array<{ key: FilterTab; label: string; count: number }> = [
     { key: "all", label: "All", count: counts.all },
     { key: "active", label: "Active", count: counts.active },
@@ -799,7 +1080,7 @@ export function DebtsView() {
                     onEdit={() => setModal({ mode: "edit", debt })}
                     onDelete={() => setDeleteTarget(debt)}
                     onPayment={() => setPaymentTarget(debt)}
-                    onPaid={() => handleMarkPaid(debt)}
+                    onPaid={() => setPaymentTarget(debt)}
                     paying={payingId === debt.id}
                   />
                 ))}
@@ -813,6 +1094,8 @@ export function DebtsView() {
         <DebtModal
           key={modal.mode === "edit" ? modal.debt.id : "add"}
           state={modal}
+          wallets={wallets}
+          linkedTransactionCount={modal.mode === "edit" ? linkedCounts[modal.debt.id] ?? 0 : 0}
           isOffline={isGuest}
           userId={isGuest ? OFFLINE_USER_ID : user?.id ?? null}
           onClose={() => setModal({ mode: "closed" })}
@@ -823,6 +1106,7 @@ export function DebtsView() {
       {paymentTarget && (
         <PaymentModal
           debt={paymentTarget}
+          wallets={wallets}
           isOffline={isGuest}
           userId={isGuest ? OFFLINE_USER_ID : user?.id ?? null}
           onClose={() => setPaymentTarget(null)}
@@ -842,6 +1126,11 @@ export function DebtsView() {
                 <h3 className="text-base font-semibold text-card-foreground">Delete debt?</h3>
                 <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
                   This debt for {deleteTarget.person_name} will be hidden from your list.
+                  {(linkedCounts[deleteTarget.id] ?? 0) > 0 && (
+                    <>
+                      {" "}It has {linkedCounts[deleteTarget.id]} linked transaction{linkedCounts[deleteTarget.id] === 1 ? "" : "s"}, which will remain in transaction history.
+                    </>
+                  )}
                 </p>
               </div>
             </div>

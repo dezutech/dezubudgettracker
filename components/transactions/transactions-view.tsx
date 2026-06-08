@@ -94,10 +94,14 @@ type SupabaseTransaction = {
   id: string;
   wallet_id: string;
   destination_wallet_id: string | null;
+  debt_id?: string | null;
+  debt_type?: "i_owe" | "owes_me" | null;
+  person_name?: string | null;
   category_id: string | null;
   amount: number | string;
   transaction_type: "income" | "expense" | "transfer";
   description: string | null;
+  notes: string | null;
   transaction_date: string;
 };
 
@@ -120,10 +124,14 @@ function localTransactionToSupabase(tx: DbTransaction): SupabaseTransaction {
     id: String(tx.id),
     wallet_id: String(tx.walletId),
     destination_wallet_id: tx.toWalletId != null ? String(tx.toWalletId) : null,
+    debt_id: tx.debtId != null ? String(tx.debtId) : null,
+    debt_type: tx.debtType ?? null,
+    person_name: tx.personName ?? null,
     category_id: tx.categoryId ? String(tx.categoryId) : null,
     amount: tx.amount,
     transaction_type: tx.type,
     description: tx.name,
+    notes: tx.notes ?? null,
     transaction_date: tx.date,
   };
 }
@@ -146,7 +154,7 @@ function resolve(
       amount:        Number(tx.amount),
       type:          tx.transaction_type,
       date:          tx.transaction_date,
-      notes:         isTransfer ? tx.description ?? undefined : undefined,
+      notes:         tx.notes ?? (isTransfer ? tx.description ?? undefined : undefined),
       categoryName:  isTransfer ? "Transfer" : cat?.name  ?? "Unknown",
       categoryIcon:  isTransfer ? "ArrowLeftRight" : cat?.icon  ?? "HelpCircle",
       categoryColor: isTransfer ? "sky" : cat?.color ?? "zinc",
@@ -700,7 +708,7 @@ function EditTransactionModal({
           .update(payload)
           .eq("id", tx.id)
           .eq("user_id", userId)
-          .select("id,user_id,wallet_id,destination_wallet_id,category_id,amount,transaction_type,description,transaction_date,created_at,is_deleted")
+          .select("id,user_id,wallet_id,destination_wallet_id,debt_id,debt_type,person_name,category_id,amount,transaction_type,description,notes,transaction_date,created_at,is_deleted")
       );
 
       if (updateError) { setError(updateError.message); return; }
@@ -952,7 +960,7 @@ export function TransactionsView() {
           "transactions",
           supabase
             .from("transactions")
-            .select("id,wallet_id,destination_wallet_id,category_id,amount,transaction_type,description,transaction_date")
+            .select("id,wallet_id,destination_wallet_id,debt_id,debt_type,person_name,category_id,amount,transaction_type,description,notes,transaction_date")
             .eq("user_id", user.id)
             .eq("is_deleted", false)
             .order("transaction_date", { ascending: false })
