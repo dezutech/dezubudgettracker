@@ -12,8 +12,11 @@ import {
   ChevronRight,
   Clock3,
   Loader2,
+  PiggyBank,
   ReceiptText,
   HandCoins,
+  Target,
+  Wallet,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { loggedSupabase, settledError } from "@/lib/supabase/query";
@@ -22,11 +25,10 @@ import { useCurrency } from "@/context/currency-context";
 import { useDashboardData as useLocalDashboardData } from "@/lib/db/hooks";
 import { OFFLINE_USER_ID } from "@/lib/offline/constants";
 import { cn } from "@/lib/utils";
-import { StatCards } from "./stat-cards";
-import { ExpenseChart } from "./expense-chart";
-import { WalletOverview } from "./wallet-overview";
 import { RecentTransactions, type DashboardRecentTx } from "./recent-transactions";
-import { TopCategories, type DashboardTopCategory } from "./top-categories";
+import type { DashboardTopCategory } from "./top-categories";
+
+type SpendingPeriod = "week" | "month" | "year";
 
 function todayMonth(): string {
   const d = new Date();
@@ -52,16 +54,19 @@ const EMPTY: {
   incomeTrend: number; expensesTrend: number; savingsTrend: number;
   chartData: Array<{ month: string; income: number; expenses: number }>;
   topCategories: DashboardTopCategory[];
+  spendingCategories: Record<SpendingPeriod, DashboardTopCategory[]>;
   recentTransactions: DashboardRecentTx[];
   bills: DashboardBill[];
   billSummary: DashboardBillSummary;
   debtSummary: DashboardDebtSummary;
+  goals: DashboardGoalSummary[];
   wallets: Array<{ id: string | number; name: string; type: string; balance: number; color: string | null; logo_url: string | null }>;
 } = {
   netWorth: 0, monthIncome: 0, monthExpenses: 0,
   netSavings: 0, savingsRate: 0,
   incomeTrend: 0, expensesTrend: 0, savingsTrend: 0,
-  chartData: [], topCategories: [], recentTransactions: [], wallets: [],
+  chartData: [], topCategories: [], spendingCategories: { week: [], month: [], year: [] }, recentTransactions: [], wallets: [],
+  goals: [],
   bills: [],
   billSummary: {
     dueThisMonthCount: 0,
@@ -118,8 +123,10 @@ type SupabaseBudget = {
 
 type SupabaseGoal = {
   id: string;
+  name: string;
   target_amount: number | string;
   current_amount: number | string;
+  target_date: string | null;
   status: string;
 };
 
@@ -184,6 +191,14 @@ type DashboardDebtSummary = {
   overdueAmount: number;
 };
 
+type DashboardGoalSummary = {
+  id: string;
+  name: string;
+  currentAmount: number;
+  targetAmount: number;
+  progress: number;
+};
+
 function monthRange(month: string) {
   const [year, mo] = month.split("-").map(Number);
   const lastDay = new Date(year, mo, 0).getDate();
@@ -191,6 +206,25 @@ function monthRange(month: string) {
     start: `${month}-01`,
     end: `${month}-${String(lastDay).padStart(2, "0")}`,
   };
+}
+
+function weekRange() {
+  const today = new Date(todayIso() + "T00:00:00");
+  const day = today.getDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  const start = new Date(today);
+  start.setDate(today.getDate() + mondayOffset);
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+  return {
+    start: toIsoDate(start),
+    end: toIsoDate(end),
+  };
+}
+
+function yearRange(month: string) {
+  const [year] = month.split("-").map(Number);
+  return { start: `${year}-01-01`, end: `${year}-12-31` };
 }
 
 function addMonths(month: string, delta: number): string {
@@ -415,6 +449,41 @@ function summarizeBills(bills: SupabaseBill[], month: string): {
       .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
       .slice(0, 5),
   };
+}
+
+function summarizeSpendingCategories(
+  transactions: SupabaseTransaction[],
+  categoryMap: Map<string, SupabaseCategory>,
+  start: string,
+  end: string
+): DashboardTopCategory[] {
+  const expenses = transactions.filter((tx) =>
+    tx.transaction_type === "expense" &&
+    tx.transaction_date >= start &&
+    tx.transaction_date <= end
+  );
+  const totalExpenses = expenses.reduce((sum, tx) => sum + amount(tx), 0);
+  const categoryTotals = new Map<string, number>();
+
+  for (const tx of expenses) {
+    const key = tx.category_id ?? "uncategorized";
+    categoryTotals.set(key, (categoryTotals.get(key) ?? 0) + amount(tx));
+  }
+
+  return [...categoryTotals.entries()]
+    .filter(([, total]) => total > 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([categoryId, total]) => {
+      const category = categoryMap.get(categoryId);
+      return {
+        categoryId,
+        name: category?.name ?? "Uncategorized",
+        icon: category?.icon ?? "Tag",
+        color: category?.color ?? "zinc",
+        total,
+        percentage: totalExpenses > 0 ? (total / totalExpenses) * 100 : 0,
+      };
+    });
 }
 
 function effectiveDebtStatus(debt: SupabaseDebt): DebtStatus {
@@ -647,6 +716,251 @@ function DashboardDebtsWidget({ summary }: { summary: DashboardDebtSummary }) {
   );
 }
 
+function AvailableBalanceCard({
+  balance,
+  walletCount,
+  currency,
+}: {
+  balance: number;
+  walletCount: number;
+  currency: string;
+}) {
+  const { formatCurrency } = useCurrency();
+
+  return (
+    <div className="dezu-card rounded-[1.25rem] bg-card/95 p-5 text-card-foreground sm:p-6">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Available Balance</p>
+          <p className="mt-2 truncate text-3xl font-bold tabular-nums tracking-tight text-foreground sm:text-4xl">
+            {formatCurrency(balance, { absolute: false })}
+          </p>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {currency} · Across {walletCount} active wallet{walletCount === 1 ? "" : "s"}
+          </p>
+        </div>
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+          <Wallet size={22} strokeWidth={1.8} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HealthCard({
+  label,
+  value,
+  sub,
+  icon: Icon,
+  tone,
+}: {
+  label: string;
+  value: string;
+  sub: string;
+  icon: typeof Wallet;
+  tone: "emerald" | "rose" | "sky" | "amber";
+}) {
+  const toneClass = {
+    emerald: "bg-emerald-500/10 text-emerald-400",
+    rose: "bg-rose-500/10 text-rose-400",
+    sky: "bg-sky-500/10 text-sky-400",
+    amber: "bg-amber-500/10 text-amber-400",
+  }[tone];
+
+  return (
+    <div className="dezu-card rounded-[1.15rem] bg-card/90 p-3 sm:p-4">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="truncate text-[11px] font-medium text-muted-foreground sm:text-xs">{label}</p>
+          <p className="mt-1 truncate text-base font-bold tabular-nums text-card-foreground sm:text-xl">{value}</p>
+          <p className="mt-0.5 truncate text-[11px] text-muted-foreground sm:text-xs">{sub}</p>
+        </div>
+        <div className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-xl", toneClass)}>
+          <Icon size={15} strokeWidth={1.8} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FinancialHealthCards({
+  income,
+  expenses,
+  netCashFlow,
+  savingsRate,
+}: {
+  income: number;
+  expenses: number;
+  netCashFlow: number;
+  savingsRate: number;
+}) {
+  const { formatCurrency } = useCurrency();
+
+  return (
+    <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4">
+      <HealthCard label="Income This Month" value={formatCurrency(income)} sub="Money in" icon={ArrowDownLeft} tone="emerald" />
+      <HealthCard label="Expenses This Month" value={formatCurrency(expenses)} sub="Money out" icon={ArrowUpRight} tone="rose" />
+      <HealthCard
+        label="Net Cash Flow"
+        value={`${netCashFlow >= 0 ? "+" : "-"}${formatCurrency(Math.abs(netCashFlow))}`}
+        sub={netCashFlow >= 0 ? "Earning more than spending" : "Spending more than earning"}
+        icon={PiggyBank}
+        tone={netCashFlow >= 0 ? "sky" : "amber"}
+      />
+      <HealthCard
+        label="Savings Rate"
+        value={`${Number.isFinite(savingsRate) ? savingsRate.toFixed(1) : "0.0"}%`}
+        sub="Net cash flow / income"
+        icon={Target}
+        tone={savingsRate >= 20 ? "emerald" : savingsRate >= 0 ? "sky" : "rose"}
+      />
+    </div>
+  );
+}
+
+function SpendingOverviewWidget({
+  period,
+  onPeriodChange,
+  categories,
+}: {
+  period: SpendingPeriod;
+  onPeriodChange: (period: SpendingPeriod) => void;
+  categories: DashboardTopCategory[];
+}) {
+  const { formatCurrency } = useCurrency();
+  const periodOptions: Array<{ key: SpendingPeriod; label: string }> = [
+    { key: "week", label: "This Week" },
+    { key: "month", label: "This Month" },
+    { key: "year", label: "This Year" },
+  ];
+
+  return (
+    <div className="dezu-card rounded-[1.15rem] bg-card/90 p-3 text-card-foreground sm:p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="font-heading text-base font-medium leading-snug">Spending Overview</h2>
+          <p className="text-sm text-muted-foreground">Expenses grouped by category</p>
+        </div>
+        <div className="theme-pill-list grid grid-cols-3 gap-1 rounded-lg p-1">
+          {periodOptions.map((option) => (
+            <button
+              key={option.key}
+              type="button"
+              onClick={() => onPeriodChange(option.key)}
+              className={cn(
+                "rounded-md px-2 py-1.5 text-[11px] font-semibold transition-colors sm:text-xs",
+                period === option.key ? "theme-selected" : "theme-pill"
+              )}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-col gap-3">
+        {categories.length === 0 ? (
+          <div className="rounded-xl bg-muted/50 py-8 text-center text-sm text-muted-foreground">
+            No expenses for this period.
+          </div>
+        ) : (
+          categories.map((category) => (
+            <Link
+              key={category.categoryId}
+              href={`/transactions?category=${encodeURIComponent(category.name)}`}
+              className="group rounded-xl p-2 transition-colors hover:bg-muted/40"
+            >
+              <div className="mb-1.5 flex items-center justify-between gap-3">
+                <span className="truncate text-sm font-medium text-card-foreground group-hover:text-primary">{category.name}</span>
+                <div className="shrink-0 text-right">
+                  <span className="text-sm font-semibold tabular-nums text-card-foreground">{formatCurrency(category.total, { decimals: 0 })}</span>
+                  <span className="ml-2 text-xs tabular-nums text-muted-foreground">{category.percentage.toFixed(1)}%</span>
+                </div>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-muted">
+                <div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${Math.min(category.percentage, 100)}%` }} />
+              </div>
+            </Link>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CompactBillsWidget({ summary }: { summary: DashboardBillSummary }) {
+  const { formatCurrency } = useCurrency();
+  return (
+    <div className="dezu-card rounded-[1.15rem] bg-card/90 p-3 text-card-foreground sm:p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="font-heading text-base font-medium">Bills</h2>
+          <p className="text-sm text-muted-foreground">Upcoming and overdue</p>
+        </div>
+        <Link href="/bills" className="theme-hover rounded-lg px-3 py-1.5 text-xs font-semibold ring-1 ring-border">View Bills</Link>
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <BillingSummaryCard label="Upcoming Bills" value={formatCurrency(summary.upcomingAmount)} sub={`${summary.upcomingCount} next 30 days`} icon={Clock3} tone="amber" />
+        <BillingSummaryCard label="Overdue Bills" value={formatCurrency(summary.overdueAmount)} sub={`${summary.overdueCount} overdue`} icon={AlertTriangle} tone="rose" />
+      </div>
+    </div>
+  );
+}
+
+function CompactDebtWidget({ summary }: { summary: DashboardDebtSummary }) {
+  const { formatCurrency } = useCurrency();
+  return (
+    <div className="dezu-card rounded-[1.15rem] bg-card/90 p-3 text-card-foreground sm:p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="font-heading text-base font-medium">Debt Summary</h2>
+          <p className="text-sm text-muted-foreground">Pay and collect</p>
+        </div>
+        <Link href="/debts" className="theme-hover rounded-lg px-3 py-1.5 text-xs font-semibold ring-1 ring-border">View Debts</Link>
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <BillingSummaryCard label="Total Payable" value={formatCurrency(summary.totalPayable)} sub="Money I owe" icon={ArrowUpRight} tone="rose" />
+        <BillingSummaryCard label="Total Collectible" value={formatCurrency(summary.totalCollectible)} sub={`${summary.overdueCount} overdue`} icon={ArrowDownLeft} tone="emerald" />
+      </div>
+    </div>
+  );
+}
+
+function GoalsSummaryWidget({ goals }: { goals: DashboardGoalSummary[] }) {
+  const { formatCurrency } = useCurrency();
+  return (
+    <div className="dezu-card rounded-[1.15rem] bg-card/90 p-3 text-card-foreground sm:p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="font-heading text-base font-medium">Goals</h2>
+          <p className="text-sm text-muted-foreground">Top active goals</p>
+        </div>
+        <Link href="/goals" className="theme-hover rounded-lg px-3 py-1.5 text-xs font-semibold ring-1 ring-border">View All Goals</Link>
+      </div>
+      <div className="mt-3 flex flex-col gap-3">
+        {goals.length === 0 ? (
+          <div className="rounded-xl bg-muted/50 py-7 text-center text-sm text-muted-foreground">No active goals yet.</div>
+        ) : (
+          goals.slice(0, 3).map((goal) => (
+            <div key={goal.id}>
+              <div className="mb-1.5 flex items-center justify-between gap-3">
+                <span className="truncate text-sm font-medium text-card-foreground">{goal.name}</span>
+                <span className="text-xs font-semibold tabular-nums text-muted-foreground">{goal.progress.toFixed(0)}%</span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-muted">
+                <div className="h-full rounded-full bg-primary" style={{ width: `${goal.progress}%` }} />
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {formatCurrency(goal.currentAmount, { decimals: 0 })} of {formatCurrency(goal.targetAmount, { decimals: 0 })}
+              </p>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
 function MonthPicker({
   month,
   onShift,
@@ -683,7 +997,9 @@ function MonthPicker({
 
 export function DashboardView() {
   const { user, loading: authLoading, isLoggingOut, isGuest } = useAuth();
+  const { currency } = useCurrency();
   const [month, setMonth] = useState(todayMonth);
+  const [spendingPeriod, setSpendingPeriod] = useState<SpendingPeriod>("month");
   const [data, setData] = useState<typeof EMPTY | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -717,7 +1033,7 @@ export function DashboardView() {
         loggedSupabase("transactions", supabase.from("transactions").select("id,wallet_id,destination_wallet_id,category_id,amount,transaction_type,description,transaction_date").eq("user_id", user.id).eq("is_deleted", false)),
         loggedSupabase("categories", supabase.from("categories").select("id,name,icon,color").eq("user_id", user.id).eq("is_deleted", false)),
         loggedSupabase("budgets", supabase.from("budgets").select("id,category_id,amount,month").eq("user_id", user.id).eq("is_deleted", false)),
-        loggedSupabase("goals", supabase.from("goals").select("id,target_amount,current_amount,status").eq("user_id", user.id).eq("is_deleted", false)),
+        loggedSupabase("goals", supabase.from("goals").select("id,name,target_amount,current_amount,target_date,status").eq("user_id", user.id).eq("is_deleted", false)),
         loggedSupabase("bills", supabase.from("bills").select("id,title,amount,due_date,status,is_recurring,recurring_id").eq("user_id", user.id).eq("is_deleted", false)),
         loggedSupabase("debts", supabase.from("debts").select("id,debt_type,remaining_balance,due_date,status").eq("user_id", user.id).eq("is_deleted", false)),
       ]);
@@ -751,6 +1067,8 @@ export function DashboardView() {
       const walletMap = new Map(wallets.map((wallet) => [wallet.id, wallet]));
       const billData = summarizeBills(bills, month);
       const debtSummary = summarizeDebts(debts);
+      const week = weekRange();
+      const year = yearRange(month);
 
       const current = monthRange(month);
       const previousMonth = addMonths(month, -1);
@@ -804,6 +1122,21 @@ export function DashboardView() {
           };
         });
 
+      const activeGoalSummaries: DashboardGoalSummary[] = goals
+        .filter((goal) => goal.status === "active")
+        .sort((a, b) =>
+          Number(b.current_amount) / Math.max(Number(b.target_amount), 1) -
+          Number(a.current_amount) / Math.max(Number(a.target_amount), 1)
+        )
+        .slice(0, 3)
+        .map((goal) => ({
+          id: goal.id,
+          name: goal.name,
+          currentAmount: Number(goal.current_amount),
+          targetAmount: Number(goal.target_amount),
+          progress: Math.min((Number(goal.current_amount) / Math.max(Number(goal.target_amount), 1)) * 100, 100),
+        }));
+
       const recentTransactions: DashboardRecentTx[] = [...transactions]
         .sort((a, b) => b.transaction_date.localeCompare(a.transaction_date))
         .slice(0, 8)
@@ -838,10 +1171,16 @@ export function DashboardView() {
         savingsTrend: pctChange(netSavings, previousSavings),
         chartData,
         topCategories,
+        spendingCategories: {
+          week: summarizeSpendingCategories(transactions, categoryMap, week.start, week.end),
+          month: topCategories,
+          year: summarizeSpendingCategories(transactions, categoryMap, year.start, year.end),
+        },
         recentTransactions,
         bills: billData.visibleBills,
         billSummary: billData.summary,
         debtSummary,
+        goals: activeGoalSummaries,
         wallets,
       });
     } catch (error) {
@@ -899,6 +1238,20 @@ export function DashboardView() {
           ...category,
           categoryId: String(category.categoryId),
         })),
+        spendingCategories: {
+          week: localDashboard.data.spendingCategories.week.map((category) => ({
+            ...category,
+            categoryId: String(category.categoryId),
+          })),
+          month: localDashboard.data.spendingCategories.month.map((category) => ({
+            ...category,
+            categoryId: String(category.categoryId),
+          })),
+          year: localDashboard.data.spendingCategories.year.map((category) => ({
+            ...category,
+            categoryId: String(category.categoryId),
+          })),
+        },
         wallets: localDashboard.data.wallets.map((wallet) => ({
           id: wallet.id,
           name: wallet.name,
@@ -939,41 +1292,32 @@ export function DashboardView() {
         </div>
       ) : (
         <>
-          {/* stat cards */}
-          <StatCards
-            netWorth={stats.netWorth}
-            monthIncome={stats.monthIncome}
-            monthExpenses={stats.monthExpenses}
-            netSavings={stats.netSavings}
+          <AvailableBalanceCard
+            balance={stats.netWorth}
+            walletCount={stats.wallets.length}
+            currency={currency}
+          />
+
+          <FinancialHealthCards
+            income={stats.monthIncome}
+            expenses={stats.monthExpenses}
+            netCashFlow={stats.netSavings}
             savingsRate={stats.savingsRate}
-            incomeTrend={stats.incomeTrend}
-            expensesTrend={stats.expensesTrend}
-            savingsTrend={stats.savingsTrend}
           />
 
-          <DashboardDebtsWidget summary={stats.debtSummary} />
-
-          <DashboardBillsWidget
-            summary={stats.billSummary}
-            bills={stats.bills}
+          <SpendingOverviewWidget
+            period={spendingPeriod}
+            onPeriodChange={setSpendingPeriod}
+            categories={stats.spendingCategories[spendingPeriod]}
           />
 
-          {/* chart + wallets */}
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 lg:gap-5">
-            <div className="lg:col-span-2">
-              <ExpenseChart chartData={stats.chartData} loading={pageLoading} />
-            </div>
-            <div className="lg:col-span-1">
-              <WalletOverview wallets={stats.wallets} />
-            </div>
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 lg:gap-5">
+            <CompactBillsWidget summary={stats.billSummary} />
+            <CompactDebtWidget summary={stats.debtSummary} />
           </div>
 
-          {/* top categories + recent transactions */}
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:gap-5">
-            <TopCategories
-              categories={stats.topCategories}
-              totalExpenses={stats.monthExpenses}
-            />
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 lg:gap-5">
+            <GoalsSummaryWidget goals={stats.goals} />
             <RecentTransactions transactions={stats.recentTransactions} />
           </div>
         </>

@@ -219,6 +219,11 @@ export type DashboardData = {
   savingsTrend: number;
   chartData: Array<{ month: string; income: number; expenses: number }>;
   topCategories: DashboardTopCategory[];
+  spendingCategories: {
+    week: DashboardTopCategory[];
+    month: DashboardTopCategory[];
+    year: DashboardTopCategory[];
+  };
   recentTransactions: DashboardRecentTx[];
   wallets: DbWallet[];
   bills: Array<{ id: string; title: string; amount: number; dueDate: string; status: BillStatus; isRecurring: boolean; recurringId?: string | null }>;
@@ -239,6 +244,13 @@ export type DashboardData = {
     overdueCount: number;
     overdueAmount: number;
   };
+  goals: Array<{
+    id: string;
+    name: string;
+    currentAmount: number;
+    targetAmount: number;
+    progress: number;
+  }>;
 };
 
 function monthRange(month: string): { start: string; end: string } {
@@ -265,6 +277,60 @@ function pctChange(curr: number, prev: number): number {
 
 function sumByType(txs: DbTransaction[], type: TransactionType): number {
   return txs.filter((t) => t.type === type).reduce((s, t) => s + t.amount, 0);
+}
+
+function todayIso() {
+  return new Date().toISOString().split("T")[0];
+}
+
+function weekRange(): { start: string; end: string } {
+  const today = new Date(todayIso() + "T00:00:00");
+  const day = today.getDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  const start = new Date(today);
+  start.setDate(today.getDate() + mondayOffset);
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+  return {
+    start: start.toISOString().split("T")[0],
+    end: end.toISOString().split("T")[0],
+  };
+}
+
+function yearRange(month: string): { start: string; end: string } {
+  const [year] = month.split("-").map(Number);
+  return { start: `${year}-01-01`, end: `${year}-12-31` };
+}
+
+function summarizeSpendingCategories(
+  txs: DbTransaction[],
+  cats: DbCategory[],
+  start: string,
+  end: string
+): DashboardTopCategory[] {
+  const catMap = new Map(cats.map((c) => [c.id, c]));
+  const expenses = txs.filter((tx) => tx.type === "expense" && tx.date >= start && tx.date <= end);
+  const totalExpenses = expenses.reduce((sum, tx) => sum + tx.amount, 0);
+  const catTotals = new Map<number, number>();
+
+  for (const tx of expenses) {
+    catTotals.set(tx.categoryId, (catTotals.get(tx.categoryId) ?? 0) + tx.amount);
+  }
+
+  return [...catTotals.entries()]
+    .filter(([, total]) => total > 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([catId, total]) => {
+      const cat = catMap.get(catId);
+      return {
+        categoryId: catId,
+        name: cat?.name ?? "Unknown",
+        icon: cat?.icon ?? "Tag",
+        color: cat?.color ?? "zinc",
+        total,
+        percentage: totalExpenses > 0 ? (total / totalExpenses) * 100 : 0,
+      };
+    });
 }
 
 function summarizeLocalBills(bills: DbBill[], month: string) {
@@ -334,21 +400,24 @@ export function useDashboardData(month: string, userId = OFFLINE_USER_ID) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const { start: monthStart, end: monthEnd } = monthRange(month);
-    const prevMonth = addMonths(month, -1);
-    const { start: prevStart, end: prevEnd } = monthRange(prevMonth);
+      const { start: monthStart, end: monthEnd } = monthRange(month);
+      const prevMonth = addMonths(month, -1);
+      const { start: prevStart, end: prevEnd } = monthRange(prevMonth);
+      const week = weekRange();
+      const year = yearRange(month);
 
     const sub = liveQuery(async () => {
       await syncRecurringMonthlyBills(userId);
       await updateOverdueLocalBills(userId);
       await updateOverdueLocalDebts(userId);
 
-      const [allTxs, wallets, cats, bills, debts] = await Promise.all([
+      const [allTxs, wallets, cats, bills, debts, goals] = await Promise.all([
         db.transactions.orderBy("date").toArray(),
         db.wallets.where("userId").equals(userId).filter((w) => !w.isArchived).toArray(),
         db.categories.where("userId").equals(userId).toArray(),
         db.bills.where("userId").equals(userId).filter((bill) => !bill.isDeleted).toArray(),
         db.debts.where("userId").equals(userId).filter((debt) => !debt.isDeleted).toArray(),
+        db.goals.where("userId").equals(userId).toArray(),
       ]);
       const scopedTxs = allTxs.filter((tx) => tx.userId === userId);
 
@@ -424,6 +493,17 @@ export function useDashboardData(month: string, userId = OFFLINE_USER_ID) {
 
       const billData = summarizeLocalBills(bills, month);
       const debtSummary = summarizeLocalDebts(debts);
+      const activeGoals = goals
+        .filter((goal) => goal.status === "active")
+        .sort((a, b) => b.currentAmount / Math.max(b.targetAmount, 1) - a.currentAmount / Math.max(a.targetAmount, 1))
+        .slice(0, 3)
+        .map((goal) => ({
+          id: String(goal.id),
+          name: goal.name,
+          currentAmount: goal.currentAmount,
+          targetAmount: goal.targetAmount,
+          progress: Math.min((goal.currentAmount / Math.max(goal.targetAmount, 1)) * 100, 100),
+        }));
 
       return {
         netWorth,
@@ -436,10 +516,16 @@ export function useDashboardData(month: string, userId = OFFLINE_USER_ID) {
         savingsTrend:  pctChange(netSavings,    prevSavings),
         chartData,
         topCategories,
+        spendingCategories: {
+          week: summarizeSpendingCategories(scopedTxs, cats, week.start, week.end),
+          month: topCategories,
+          year: summarizeSpendingCategories(scopedTxs, cats, year.start, year.end),
+        },
         recentTransactions,
         bills: billData.bills,
         billSummary: billData.billSummary,
         debtSummary,
+        goals: activeGoals,
         wallets,
       };
     }).subscribe({

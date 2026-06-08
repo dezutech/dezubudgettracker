@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   Search, Plus, ChevronDown, StickyNote,
   X, ArrowDownLeft, ArrowUpRight, TrendingUp,
@@ -905,6 +906,7 @@ function TransactionRow({
 type TypeFilter = "all" | "income" | "expense" | "transfer";
 
 export function TransactionsView() {
+  const searchParams = useSearchParams();
   const { formatCurrency, symbol } = useCurrency();
   const { user, loading: authLoading, isLoggingOut, isGuest } = useAuth();
   const [rawTxs, setRawTxs] = useState<SupabaseTransaction[]>([]);
@@ -1027,6 +1029,13 @@ export function TransactionsView() {
     () => [...new Set(allResolved.map((t) => t.walletName))].sort().map((n) => ({ value: n, label: n })),
     [allResolved]
   );
+
+  useEffect(() => {
+    const category = searchParams.get("category");
+    if (!category || catOptions.length === 0) return;
+    const match = catOptions.find((option) => option.value.toLowerCase() === category.toLowerCase());
+    if (match) setCatFilter(match.value);
+  }, [catOptions, searchParams]);
 
   // base filter (search + category + wallet) — used for type tab counts
   const baseFiltered = useMemo(() => {
