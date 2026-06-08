@@ -8,6 +8,7 @@ import type {
   DbRecurringTransaction,
   DbGoal,
   DbBill,
+  DbDebt,
 } from "./schema";
 
 // ─── Database class ───────────────────────────────────────────────────────────
@@ -21,6 +22,7 @@ class DesuBudgetDB extends Dexie {
   recurringTransactions!: EntityTable<DbRecurringTransaction, "id">;
   goals!: EntityTable<DbGoal, "id">;
   bills!: EntityTable<DbBill, "id">;
+  debts!: EntityTable<DbDebt, "id">;
 
   constructor() {
     super("dezuBudgetDB");
@@ -78,6 +80,10 @@ class DesuBudgetDB extends Dexie {
 
     this.version(6).stores({
       bills: "++id, userId, dueDate, status, recurringId, isDeleted, [userId+dueDate], [userId+status], [userId+recurringId+dueDate]",
+    });
+
+    this.version(7).stores({
+      debts: "++id, userId, debtType, status, dueDate, isDeleted, [userId+status], [userId+debtType], [userId+dueDate]",
     });
   }
 }

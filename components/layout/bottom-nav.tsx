@@ -13,7 +13,7 @@ function isRouteActive(href: string, pathname: string): boolean {
 export function BottomNav() {
   const pathname = usePathname();
   const bottomNavItems = navItems.filter((item) =>
-    ["/dashboard", "/wallets", "/transactions", "/budgets", "/bills", "/goals"].includes(item.href)
+    ["/dashboard", "/wallets", "/transactions", "/bills", "/debts", "/goals"].includes(item.href)
   );
 
   return (

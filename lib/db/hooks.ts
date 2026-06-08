@@ -3,6 +3,7 @@ import { liveQuery } from "dexie";
 import { OFFLINE_USER_ID } from "@/lib/offline/constants";
 import { db } from "./database";
 import { syncRecurringMonthlyBills, updateOverdueLocalBills } from "./bills";
+import { effectiveDebtStatus, updateOverdueLocalDebts } from "./debts";
 import type {
   DbWallet,
   DbTransaction,
@@ -12,6 +13,7 @@ import type {
   DbRecurringTransaction,
   BillStatus,
   DbGoal,
+  DbDebt,
   TransactionType,
 } from "./schema";
 
@@ -231,6 +233,12 @@ export type DashboardData = {
     paidThisMonthAmount: number;
     remainingAmount: number;
   };
+  debtSummary: {
+    totalPayable: number;
+    totalCollectible: number;
+    overdueCount: number;
+    overdueAmount: number;
+  };
 };
 
 function monthRange(month: string): { start: string; end: string } {
@@ -304,6 +312,23 @@ function summarizeLocalBills(bills: DbBill[], month: string) {
   };
 }
 
+function summarizeLocalDebts(debts: DbDebt[]) {
+  const active = debts
+    .filter((debt) => !debt.isDeleted)
+    .map((debt) => ({ ...debt, status: effectiveDebtStatus(debt) }))
+    .filter((debt) => debt.status !== "paid" && debt.remainingBalance > 0);
+  const payable = active.filter((debt) => debt.debtType === "i_owe");
+  const collectible = active.filter((debt) => debt.debtType === "owes_me");
+  const overdue = active.filter((debt) => debt.status === "overdue");
+
+  return {
+    totalPayable: payable.reduce((sum, debt) => sum + debt.remainingBalance, 0),
+    totalCollectible: collectible.reduce((sum, debt) => sum + debt.remainingBalance, 0),
+    overdueCount: overdue.length,
+    overdueAmount: overdue.reduce((sum, debt) => sum + debt.remainingBalance, 0),
+  };
+}
+
 export function useDashboardData(month: string, userId = OFFLINE_USER_ID) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -316,12 +341,14 @@ export function useDashboardData(month: string, userId = OFFLINE_USER_ID) {
     const sub = liveQuery(async () => {
       await syncRecurringMonthlyBills(userId);
       await updateOverdueLocalBills(userId);
+      await updateOverdueLocalDebts(userId);
 
-      const [allTxs, wallets, cats, bills] = await Promise.all([
+      const [allTxs, wallets, cats, bills, debts] = await Promise.all([
         db.transactions.orderBy("date").toArray(),
         db.wallets.where("userId").equals(userId).filter((w) => !w.isArchived).toArray(),
         db.categories.where("userId").equals(userId).toArray(),
         db.bills.where("userId").equals(userId).filter((bill) => !bill.isDeleted).toArray(),
+        db.debts.where("userId").equals(userId).filter((debt) => !debt.isDeleted).toArray(),
       ]);
       const scopedTxs = allTxs.filter((tx) => tx.userId === userId);
 
@@ -396,6 +423,7 @@ export function useDashboardData(month: string, userId = OFFLINE_USER_ID) {
         });
 
       const billData = summarizeLocalBills(bills, month);
+      const debtSummary = summarizeLocalDebts(debts);
 
       return {
         netWorth,
@@ -411,6 +439,7 @@ export function useDashboardData(month: string, userId = OFFLINE_USER_ID) {
         recentTransactions,
         bills: billData.bills,
         billSummary: billData.billSummary,
+        debtSummary,
         wallets,
       };
     }).subscribe({

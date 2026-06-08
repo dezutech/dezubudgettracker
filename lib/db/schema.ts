@@ -134,10 +134,29 @@ export type DbBill = {
   updatedAt: string;
 };
 
+export type DebtType = "i_owe" | "owes_me";
+export type DebtStatus = "active" | "paid" | "overdue";
+
+export type DbDebt = {
+  id: number;
+  userId: string;
+  personName: string;
+  debtType: DebtType;
+  originalAmount: number;
+  remainingBalance: number;
+  borrowedDate: string;
+  dueDate: string | null;
+  notes?: string;
+  status: DebtStatus;
+  isDeleted: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
 // ─── SyncQueue ───────────────────────────────────────────────────────────────
 
 export type SyncAction = "create" | "update" | "delete";
-export type SyncTable = "wallets" | "transactions" | "categories" | "budgets" | "recurringTransactions" | "goals" | "bills";
+export type SyncTable = "wallets" | "transactions" | "categories" | "budgets" | "recurringTransactions" | "goals" | "bills" | "debts";
 export type SyncStatus = "pending" | "syncing" | "done" | "failed";
 
 export type DbSyncQueueItem = {
@@ -176,6 +195,9 @@ export type UpdateGoalInput = Partial<Omit<DbGoal, "id" | "createdAt" | "updated
 
 export type CreateBillInput = Omit<DbBill, "id" | "createdAt" | "updatedAt">;
 export type UpdateBillInput = Partial<Omit<DbBill, "id" | "createdAt" | "updatedAt">>;
+
+export type CreateDebtInput = Omit<DbDebt, "id" | "createdAt" | "updatedAt">;
+export type UpdateDebtInput = Partial<Omit<DbDebt, "id" | "createdAt" | "updatedAt">>;
 
 // ─── Query helpers ───────────────────────────────────────────────────────────
 

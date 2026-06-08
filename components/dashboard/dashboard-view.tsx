@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
+  ArrowDownLeft,
+  ArrowUpRight,
   Calendar,
   CheckCircle2,
   ChevronLeft,
@@ -11,6 +13,7 @@ import {
   Clock3,
   Loader2,
   ReceiptText,
+  HandCoins,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { loggedSupabase, settledError } from "@/lib/supabase/query";
@@ -52,6 +55,7 @@ const EMPTY: {
   recentTransactions: DashboardRecentTx[];
   bills: DashboardBill[];
   billSummary: DashboardBillSummary;
+  debtSummary: DashboardDebtSummary;
   wallets: Array<{ id: string | number; name: string; type: string; balance: number; color: string | null; logo_url: string | null }>;
 } = {
   netWorth: 0, monthIncome: 0, monthExpenses: 0,
@@ -69,6 +73,12 @@ const EMPTY: {
     paidThisMonthCount: 0,
     paidThisMonthAmount: 0,
     remainingAmount: 0,
+  },
+  debtSummary: {
+    totalPayable: 0,
+    totalCollectible: 0,
+    overdueCount: 0,
+    overdueAmount: 0,
   },
 };
 
@@ -125,6 +135,16 @@ type SupabaseBill = {
   recurring_id: string | null;
 };
 
+type DebtStatus = "active" | "paid" | "overdue";
+
+type SupabaseDebt = {
+  id: string;
+  debt_type: "i_owe" | "owes_me";
+  remaining_balance: number | string;
+  due_date: string | null;
+  status: DebtStatus;
+};
+
 type SupabaseRecurringRow = {
   id: string;
   wallet_id: string | null;
@@ -155,6 +175,13 @@ type DashboardBillSummary = {
   paidThisMonthCount: number;
   paidThisMonthAmount: number;
   remainingAmount: number;
+};
+
+type DashboardDebtSummary = {
+  totalPayable: number;
+  totalCollectible: number;
+  overdueCount: number;
+  overdueAmount: number;
 };
 
 function monthRange(month: string) {
@@ -390,6 +417,42 @@ function summarizeBills(bills: SupabaseBill[], month: string): {
   };
 }
 
+function effectiveDebtStatus(debt: SupabaseDebt): DebtStatus {
+  if (debt.status === "paid" || Number(debt.remaining_balance) <= 0) return "paid";
+  if (debt.due_date && debt.due_date < todayIso()) return "overdue";
+  return "active";
+}
+
+function summarizeDebts(debts: SupabaseDebt[]): DashboardDebtSummary {
+  const active = debts
+    .map((debt) => ({ ...debt, status: effectiveDebtStatus(debt) }))
+    .filter((debt) => debt.status !== "paid" && Number(debt.remaining_balance) > 0);
+  const payable = active.filter((debt) => debt.debt_type === "i_owe");
+  const collectible = active.filter((debt) => debt.debt_type === "owes_me");
+  const overdue = active.filter((debt) => debt.status === "overdue");
+
+  return {
+    totalPayable: payable.reduce((sum, debt) => sum + Number(debt.remaining_balance), 0),
+    totalCollectible: collectible.reduce((sum, debt) => sum + Number(debt.remaining_balance), 0),
+    overdueCount: overdue.length,
+    overdueAmount: overdue.reduce((sum, debt) => sum + Number(debt.remaining_balance), 0),
+  };
+}
+
+async function updateOverdueDebtsForDashboard(userId: string) {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("debts")
+    .update({ status: "overdue" })
+    .eq("user_id", userId)
+    .eq("is_deleted", false)
+    .neq("status", "paid")
+    .gt("remaining_balance", 0)
+    .lt("due_date", todayIso());
+
+  return error?.message ?? "";
+}
+
 function BillingSummaryCard({
   label,
   value,
@@ -538,6 +601,52 @@ function DashboardBillsWidget({
   );
 }
 
+function DashboardDebtsWidget({ summary }: { summary: DashboardDebtSummary }) {
+  const { formatCurrency } = useCurrency();
+
+  return (
+    <div className="dezu-card rounded-[1.15rem] bg-card/90 py-3 text-sm text-card-foreground sm:py-4">
+      <div className="grid gap-2 px-3 sm:grid-cols-[1fr_auto] sm:px-4">
+        <div>
+          <h2 className="font-heading text-base font-medium leading-snug">Debt Tracker</h2>
+          <p className="text-sm text-muted-foreground">Borrowed and lent money at a glance</p>
+        </div>
+        <Link
+          href="/debts"
+          className="theme-hover inline-flex min-h-8 items-center justify-center rounded-lg bg-[var(--theme-card)] px-3 py-1.5 text-xs font-semibold text-foreground transition-colors ring-1 ring-border"
+        >
+          View Debt Tracker
+        </Link>
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-2 px-3 sm:mt-4 sm:gap-3 sm:px-4 lg:grid-cols-3">
+        <BillingSummaryCard
+          label="Total Payable"
+          value={formatCurrency(summary.totalPayable)}
+          sub="Money I owe"
+          icon={ArrowUpRight}
+          tone="rose"
+        />
+        <BillingSummaryCard
+          label="Total Collectible"
+          value={formatCurrency(summary.totalCollectible)}
+          sub="Money owed to me"
+          icon={ArrowDownLeft}
+          tone="emerald"
+        />
+        <BillingSummaryCard
+          label="Overdue Debts"
+          value={formatCurrency(summary.overdueAmount)}
+          sub={`${summary.overdueCount} overdue`}
+          icon={HandCoins}
+          tone="amber"
+          className="col-span-2 lg:col-span-1"
+        />
+      </div>
+    </div>
+  );
+}
+
 function MonthPicker({
   month,
   onShift,
@@ -600,20 +709,22 @@ export function DashboardView() {
       }
 
       const recurringSyncError = await syncRecurringMonthlyBillsForDashboard(user.id, month);
+      const debtOverdueError = await updateOverdueDebtsForDashboard(user.id);
 
       const supabase = createClient();
-      const [walletSettled, txSettled, categorySettled, budgetSettled, goalSettled, billSettled] = await Promise.allSettled([
+      const [walletSettled, txSettled, categorySettled, budgetSettled, goalSettled, billSettled, debtSettled] = await Promise.allSettled([
         loggedSupabase("wallets", supabase.from("wallets").select("id,name,type,balance,color,logo_url").eq("user_id", user.id).eq("is_deleted", false)),
         loggedSupabase("transactions", supabase.from("transactions").select("id,wallet_id,destination_wallet_id,category_id,amount,transaction_type,description,transaction_date").eq("user_id", user.id).eq("is_deleted", false)),
         loggedSupabase("categories", supabase.from("categories").select("id,name,icon,color").eq("user_id", user.id).eq("is_deleted", false)),
         loggedSupabase("budgets", supabase.from("budgets").select("id,category_id,amount,month").eq("user_id", user.id).eq("is_deleted", false)),
         loggedSupabase("goals", supabase.from("goals").select("id,target_amount,current_amount,status").eq("user_id", user.id).eq("is_deleted", false)),
         loggedSupabase("bills", supabase.from("bills").select("id,title,amount,due_date,status,is_recurring,recurring_id").eq("user_id", user.id).eq("is_deleted", false)),
+        loggedSupabase("debts", supabase.from("debts").select("id,debt_type,remaining_balance,due_date,status").eq("user_id", user.id).eq("is_deleted", false)),
       ]);
 
       if (!isCurrent()) return;
 
-      const errors = [recurringSyncError, ...[walletSettled, txSettled, categorySettled, budgetSettled, goalSettled, billSettled]
+      const errors = [recurringSyncError, debtOverdueError, ...[walletSettled, txSettled, categorySettled, budgetSettled, goalSettled, billSettled, debtSettled]
         .map(settledError)
       ].filter(Boolean);
       if (errors.length > 0) setLoadError(errors.join(" | "));
@@ -624,6 +735,7 @@ export function DashboardView() {
       const budgetResult = budgetSettled.status === "fulfilled" ? budgetSettled.value : { data: [] };
       const goalResult = goalSettled.status === "fulfilled" ? goalSettled.value : { data: [] };
       const billResult = billSettled.status === "fulfilled" ? billSettled.value : { data: [] };
+      const debtResult = debtSettled.status === "fulfilled" ? debtSettled.value : { data: [] };
 
       const wallets = ((walletResult.data ?? []) as SupabaseWallet[]).map((wallet) => ({
         ...wallet,
@@ -634,9 +746,11 @@ export function DashboardView() {
       const budgets = (budgetResult.data ?? []) as SupabaseBudget[];
       const goals = (goalResult.data ?? []) as SupabaseGoal[];
       const bills = (billResult.data ?? []) as SupabaseBill[];
+      const debts = (debtResult.data ?? []) as SupabaseDebt[];
       const categoryMap = new Map(categories.map((category) => [category.id, category]));
       const walletMap = new Map(wallets.map((wallet) => [wallet.id, wallet]));
       const billData = summarizeBills(bills, month);
+      const debtSummary = summarizeDebts(debts);
 
       const current = monthRange(month);
       const previousMonth = addMonths(month, -1);
@@ -727,6 +841,7 @@ export function DashboardView() {
         recentTransactions,
         bills: billData.visibleBills,
         billSummary: billData.summary,
+        debtSummary,
         wallets,
       });
     } catch (error) {
@@ -762,6 +877,11 @@ export function DashboardView() {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "recurring_transactions", filter: `user_id=eq.${user.id}` },
+        () => loadDashboard()
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "debts", filter: `user_id=eq.${user.id}` },
         () => loadDashboard()
       )
       .subscribe();
@@ -830,6 +950,8 @@ export function DashboardView() {
             expensesTrend={stats.expensesTrend}
             savingsTrend={stats.savingsTrend}
           />
+
+          <DashboardDebtsWidget summary={stats.debtSummary} />
 
           <DashboardBillsWidget
             summary={stats.billSummary}

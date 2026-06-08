@@ -40,6 +40,11 @@ export type {
   DbBill,
   CreateBillInput,
   UpdateBillInput,
+  DebtType,
+  DebtStatus,
+  DbDebt,
+  CreateDebtInput,
+  UpdateDebtInput,
   // Query helpers
   TransactionQuery,
 } from "./schema";
@@ -124,6 +129,17 @@ export {
   updateOverdueLocalBills,
   syncRecurringMonthlyBills,
 } from "./bills";
+
+export {
+  getDebts,
+  createDebt,
+  updateDebt,
+  archiveDebt,
+  addDebtPayment,
+  markDebtPaid,
+  updateOverdueLocalDebts,
+  effectiveDebtStatus,
+} from "./debts";
 
 // ─── Seed / reset ─────────────────────────────────────────────────────────────
 export { seedDatabase, resetDatabase } from "./seed";

@@ -15,6 +15,8 @@ export type GoalStatus = "active" | "completed" | "paused" | "cancelled";
 export type RecurringFrequency = "daily" | "weekly" | "monthly" | "yearly";
 export type RecurringTransactionType = Exclude<TransactionType, "transfer">;
 export type BillStatus = "unpaid" | "paid" | "overdue" | "scheduled";
+export type DebtType = "i_owe" | "owes_me";
+export type DebtStatus = "active" | "paid" | "overdue";
 
 type CommonRow = {
   id: string;
@@ -295,6 +297,38 @@ export interface Database {
           recurring_id?: string | null;
         };
       };
+      debts: {
+        Row: CommonRow & {
+          person_name: string;
+          debt_type: DebtType;
+          original_amount: number;
+          remaining_balance: number;
+          borrowed_date: string;
+          due_date: string | null;
+          notes: string | null;
+          status: DebtStatus;
+        };
+        Insert: CommonInsert & {
+          person_name: string;
+          debt_type: DebtType;
+          original_amount: number;
+          remaining_balance?: number;
+          borrowed_date: string;
+          due_date?: string | null;
+          notes?: string | null;
+          status?: DebtStatus;
+        };
+        Update: CommonUpdate & {
+          person_name?: string;
+          debt_type?: DebtType;
+          original_amount?: number;
+          remaining_balance?: number;
+          borrowed_date?: string;
+          due_date?: string | null;
+          notes?: string | null;
+          status?: DebtStatus;
+        };
+      };
     };
     Views: Record<string, never>;
     Functions: {
@@ -332,3 +366,4 @@ export type Goal = Tables<"goals">;
 export type Notification = Tables<"notifications">;
 export type RecurringTransaction = Tables<"recurring_transactions">;
 export type Bill = Tables<"bills">;
+export type Debt = Tables<"debts">;

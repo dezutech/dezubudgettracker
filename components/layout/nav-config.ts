@@ -7,6 +7,7 @@ import {
   Repeat,
   Trophy,
   Settings,
+  HandCoins,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -22,10 +23,11 @@ export const navItems: NavItem[] = [
   { href: "/transactions",label: "Transactions", icon: ArrowLeftRight  },
   { href: "/budgets",     label: "Budgets",      icon: Target          },
   { href: "/bills",       label: "Bills",        icon: ReceiptText     },
+  { href: "/debts",       label: "Debts",        icon: HandCoins       },
   { href: "/recurring",   label: "Recurring",    icon: Repeat          },
   { href: "/goals",       label: "Goals",        icon: Trophy          },
   { href: "/settings",    label: "Settings",     icon: Settings        },
 ];
 
-export const mainNavItems  = navItems.slice(0, 7);
-export const settingsNavItem = navItems[7];
+export const mainNavItems  = navItems.slice(0, 8);
+export const settingsNavItem = navItems[8];
