@@ -7,8 +7,9 @@ import {
   Briefcase, Globe, PiggyBank, Gift, Building2,
   Smartphone, Shield, Rocket, Dumbbell, Music,
   TrendingUp, Heart, Coffee, Camera,
-  CheckCircle2, ChevronDown, ChevronUp,
+  CheckCircle2, ChevronDown, ChevronUp, Search, SlidersHorizontal,
 } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
 import { loggedSupabase, settledError } from "@/lib/supabase/query";
 import { useAuth } from "@/context/auth-context";
@@ -1159,10 +1160,61 @@ function DeleteConfirmModal({
 
 type FilterTab = "all" | "active" | "completed" | "paused";
 
+function GoalsFilterModal({
+  open,
+  tabs,
+  value,
+  onChange,
+  onClose,
+}: {
+  open: boolean;
+  tabs: Array<{ key: FilterTab; label: string; count: number }>;
+  value: FilterTab;
+  onChange: (value: FilterTab) => void;
+  onClose: () => void;
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-end justify-center p-0 sm:items-center sm:p-4">
+      <div className="absolute inset-0 theme-overlay backdrop-blur-sm" onClick={onClose} />
+      <div className="theme-surface relative w-full rounded-t-2xl shadow-2xl ring-1 ring-border sm:max-w-md sm:rounded-2xl">
+        <div className="flex items-center justify-between border-b border-border px-5 py-4">
+          <h2 className="text-base font-semibold text-zinc-50">Filters</h2>
+          <button type="button" onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-[var(--theme-primary-soft)] hover:text-[var(--theme-primary)]">
+            <X size={15} />
+          </button>
+        </div>
+        <div className="grid gap-2 px-5 py-5">
+          {tabs.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => {
+                onChange(tab.key);
+                onClose();
+              }}
+              className={cn(
+                "flex min-h-11 items-center justify-between rounded-xl px-3 text-sm font-medium transition-colors",
+                value === tab.key ? "theme-selected" : "theme-hover bg-[var(--theme-card)] text-muted-foreground ring-1 ring-border"
+              )}
+            >
+              <span>{tab.label}</span>
+              <span className="rounded px-1.5 text-xs font-semibold tabular-nums opacity-75">{tab.count}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function GoalsView() {
   const { user, loading: authLoading, isLoggingOut, isGuest } = useAuth();
   const { formatCurrency } = useCurrency();
   const [filter,            setFilter]           = useState<FilterTab>("all");
+  const [search,            setSearch]           = useState("");
+  const [filterOpen,        setFilterOpen]       = useState(false);
   const [modal,             setModal]            = useState<ModalState>({ mode: "closed" });
   const [contributeTarget,  setContributeTarget] = useState<AppGoal | null>(null);
   const [deleteTarget,      setDeleteTarget]     = useState<AppGoal | null>(null);
@@ -1259,10 +1311,23 @@ export function GoalsView() {
     paused:    goals.filter((g) => g.status === "paused").length,
   }), [goals]);
 
+  const tabs: Array<{ key: FilterTab; label: string; count: number }> = [
+    { key: "all", label: "All", count: counts.all },
+    { key: "active", label: "Active", count: counts.active },
+    { key: "completed", label: "Completed", count: counts.completed },
+    { key: "paused", label: "Paused", count: counts.paused },
+  ];
+
   const filtered = useMemo(() => {
-    if (filter === "all") return goals;
-    return goals.filter((g) => g.status === filter);
-  }, [goals, filter]);
+    const q = search.trim().toLowerCase();
+    return goals.filter((goal) => {
+      if (filter !== "all" && goal.status !== filter) return false;
+      if (!q) return true;
+      return [goal.name, goal.status, goal.targetDate ?? ""].some((value) =>
+        value.toLowerCase().includes(q)
+      );
+    });
+  }, [goals, filter, search]);
 
   const totalSaved  = useMemo(() => goals.filter(g => g.status === "active").reduce((s, g) => s + g.currentAmount, 0), [goals]);
   const totalTarget = useMemo(() => goals.filter(g => g.status === "active").reduce((s, g) => s + g.targetAmount, 0), [goals]);
@@ -1373,33 +1438,26 @@ export function GoalsView() {
               </div>
             )}
 
-            {/* filter tabs */}
-            <div className="theme-pill-list no-scrollbar flex w-full snap-x snap-mandatory scroll-px-3 flex-nowrap items-center gap-2 overflow-x-auto overscroll-x-contain rounded-lg p-1.5 [-webkit-overflow-scrolling:touch] sm:w-fit sm:gap-0.5 sm:p-1">
-              {(
-                [
-                  { key: "all",       label: "All"       },
-                  { key: "active",    label: "Active"    },
-                  { key: "completed", label: "Completed" },
-                  { key: "paused",    label: "Paused"    },
-                ] as const
-              ).map(({ key, label }) => (
-                <button
-                  key={key}
-                  onClick={() => setFilter(key)}
-                  className={cn(
-                    "flex min-h-10 min-w-max shrink-0 snap-start items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 py-2 text-xs font-medium leading-none transition-colors sm:min-h-0 sm:px-4 sm:py-1.5",
-                    filter === key ? "theme-selected" : "theme-pill"
-                  )}
-                >
-                  {label}
-                  <span className={cn(
-                    "min-w-5 rounded px-1 text-center text-[10px] font-semibold tabular-nums leading-4",
-                    filter === key ? "opacity-70" : "text-zinc-600"
-                  )}>
-                    {counts[key]}
-                  </span>
-                </button>
-              ))}
+            {/* toolbar */}
+            <div className="flex items-center gap-2">
+              <div className="relative min-w-0 flex-1">
+                <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search goals..." className="h-9 border-zinc-700 bg-zinc-900 pl-9 text-sm" />
+                {search && (
+                  <button type="button" onClick={() => setSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300">
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setFilterOpen(true)}
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-zinc-900 text-zinc-500 ring-1 ring-zinc-800 transition-colors hover:bg-[var(--theme-primary-soft)] hover:text-[var(--theme-primary)]"
+                title="Filters"
+                aria-label="Open goal filters"
+              >
+                <SlidersHorizontal size={15} />
+              </button>
             </div>
 
             {/* goals grid */}
@@ -1461,6 +1519,13 @@ export function GoalsView() {
         isOffline={isGuest}
         onClose={() => setContributeTarget(null)}
         onSaved={loadGoals}
+      />
+      <GoalsFilterModal
+        open={filterOpen}
+        tabs={tabs}
+        value={filter}
+        onChange={setFilter}
+        onClose={() => setFilterOpen(false)}
       />
       <DeleteConfirmModal
         goal={deleteTarget}

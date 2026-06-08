@@ -236,6 +236,7 @@ function MobileFilterSheet({
   walletValue,
   catOptions,
   walOptions,
+  counts,
   onClose,
   onApply,
   onClear,
@@ -246,6 +247,7 @@ function MobileFilterSheet({
   walletValue: string;
   catOptions: { value: string; label: string }[];
   walOptions: { value: string; label: string }[];
+  counts: Record<TypeFilter, number>;
   onClose: () => void;
   onApply: (filters: { type: TypeFilter; category: string; wallet: string }) => void;
   onClear: () => void;
@@ -264,9 +266,9 @@ function MobileFilterSheet({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-end sm:hidden">
+    <div className="fixed inset-0 z-[70] flex items-end justify-center p-0 sm:items-center sm:p-4">
       <div className="absolute inset-0 theme-overlay backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full rounded-t-2xl bg-zinc-900 ring-1 ring-white/10 shadow-2xl">
+      <div className="relative w-full rounded-t-2xl bg-zinc-900 ring-1 ring-white/10 shadow-2xl sm:max-w-md sm:rounded-2xl">
         <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
           <h2 className="text-base font-semibold text-zinc-50">Filters</h2>
           <button onClick={onClose} className="w-7 h-7 rounded-lg flex items-center justify-center text-zinc-400 hover:text-[var(--theme-primary)] hover:bg-[var(--theme-primary-soft)] transition-colors">
@@ -277,14 +279,14 @@ function MobileFilterSheet({
         <div className="px-5 py-5 flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium text-zinc-400">Type</label>
-            <div className="grid grid-cols-3 gap-1 p-1 bg-zinc-800 rounded-lg">
+            <div className="grid grid-cols-2 gap-1 p-1 bg-zinc-800 rounded-lg">
               {(["all", "income", "expense", "transfer"] as TypeFilter[]).map((type) => (
                 <button
                   key={type}
                   type="button"
                   onClick={() => setDraftType(type)}
                   className={cn(
-                    "py-1.5 rounded-md text-xs font-medium capitalize transition-colors",
+                    "flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium capitalize transition-colors",
                     draftType === type
                       ? type === "income" ? "bg-emerald-500/20 text-emerald-300"
                       : type === "expense" ? "bg-rose-500/20 text-rose-300"
@@ -293,7 +295,8 @@ function MobileFilterSheet({
                       : "text-zinc-400 hover:text-zinc-200"
                   )}
                 >
-                  {type}
+                  <span>{type}</span>
+                  <span className="rounded px-1 text-[10px] opacity-70">{counts[type]}</span>
                 </button>
               ))}
             </div>
@@ -1222,8 +1225,8 @@ export function TransactionsView() {
             </div>
 
             {/* toolbar */}
-            <div className="flex flex-col gap-3">
-              <div className="relative">
+            <div className="flex items-center gap-2">
+              <div className="relative min-w-0 flex-1">
                 <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
                 <Input
                   placeholder="Search transactions, categories, wallets…"
@@ -1236,50 +1239,15 @@ export function TransactionsView() {
                   </button>
                 )}
               </div>
-
-              <div className="flex min-w-0 items-center gap-2">
-                {/* type pills */}
-                <div className="theme-pill-list no-scrollbar flex min-w-0 flex-1 snap-x snap-mandatory scroll-px-3 flex-nowrap items-center gap-2 overflow-x-auto overscroll-x-contain rounded-lg p-1.5 [-webkit-overflow-scrolling:touch] sm:flex-none sm:gap-0.5 sm:p-1">
-                  {(
-                    [
-                      { key: "all",     label: "All"     },
-                      { key: "income",  label: "Income"  },
-                      { key: "expense", label: "Expense" },
-                      { key: "transfer", label: "Transfer" },
-                    ] as const
-                  ).map(({ key, label }) => (
-                    <button
-                      key={key}
-                      onClick={() => setTypeFilter(key)}
-                      className={cn(
-                        "flex min-h-10 min-w-max shrink-0 snap-start items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 py-2 text-xs font-medium leading-none transition-colors sm:min-h-0 sm:px-3 sm:py-1.5",
-                        typeFilter === key ? "theme-selected" : "theme-pill"
-                      )}
-                    >
-                      {label}
-                      <span className={cn("min-w-5 rounded px-1 text-center text-[10px] font-semibold tabular-nums leading-4", typeFilter === key ? "opacity-80" : "text-zinc-500")}>
-                        {counts[key]}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-
-                <div className="hidden flex-1 sm:block" />
-
-                <div className="hidden sm:block">
-                  <SelectField value={catFilter} onChange={setCatFilter} options={catOptions} placeholder="All Categories" />
-                </div>
-                <div className="hidden sm:block">
-                  <SelectField value={walFilter} onChange={setWalFilter} options={walOptions} placeholder="All Wallets"    />
-                </div>
-                <button
-                  onClick={() => setFilterOpen(true)}
-                  className="sm:hidden w-9 h-9 rounded-lg flex items-center justify-center bg-zinc-900 ring-1 ring-zinc-800 text-zinc-400 hover:text-[var(--theme-primary)] hover:bg-[var(--theme-primary-soft)] transition-colors"
-                  title="Filters"
-                >
-                  <SlidersHorizontal size={15} />
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => setFilterOpen(true)}
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-zinc-900 text-zinc-400 ring-1 ring-zinc-800 transition-colors hover:bg-[var(--theme-primary-soft)] hover:text-[var(--theme-primary)]"
+                title="Filters"
+                aria-label="Open transaction filters"
+              >
+                <SlidersHorizontal size={15} />
+              </button>
             </div>
 
             {/* results count */}
@@ -1352,6 +1320,7 @@ export function TransactionsView() {
         walletValue={walFilter}
         catOptions={catOptions}
         walOptions={walOptions}
+        counts={counts}
         onClose={() => setFilterOpen(false)}
         onClear={() => {
           setTypeFilter("all");

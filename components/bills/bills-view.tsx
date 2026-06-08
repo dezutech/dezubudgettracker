@@ -11,6 +11,7 @@ import {
   Plus,
   ReceiptText,
   Search,
+  SlidersHorizontal,
   Trash2,
   Wallet,
   X,
@@ -621,6 +622,55 @@ function BillRow({
   );
 }
 
+function BillsFilterModal({
+  open,
+  tabs,
+  value,
+  onChange,
+  onClose,
+}: {
+  open: boolean;
+  tabs: Array<{ key: FilterTab; label: string; count: number }>;
+  value: FilterTab;
+  onChange: (value: FilterTab) => void;
+  onClose: () => void;
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-end justify-center p-0 sm:items-center sm:p-4">
+      <div className="absolute inset-0 theme-overlay backdrop-blur-sm" onClick={onClose} />
+      <div className="theme-surface relative w-full rounded-t-2xl shadow-2xl ring-1 ring-border sm:max-w-md sm:rounded-2xl">
+        <div className="flex items-center justify-between border-b border-border px-5 py-4">
+          <h2 className="text-base font-semibold text-card-foreground">Filters</h2>
+          <button type="button" onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+            <X size={15} />
+          </button>
+        </div>
+        <div className="grid gap-2 px-5 py-5">
+          {tabs.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => {
+                onChange(tab.key);
+                onClose();
+              }}
+              className={cn(
+                "flex min-h-11 items-center justify-between rounded-xl px-3 text-sm font-medium transition-colors",
+                value === tab.key ? "theme-selected" : "theme-hover bg-[var(--theme-card)] text-muted-foreground ring-1 ring-border"
+              )}
+            >
+              <span>{tab.label}</span>
+              <span className="rounded px-1.5 text-xs font-semibold tabular-nums opacity-75">{tab.count}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function BillsView() {
   const { formatCurrency } = useCurrency();
   const { user, loading: authLoading, isLoggingOut, isGuest } = useAuth();
@@ -632,6 +682,7 @@ export function BillsView() {
   const [actionError, setActionError] = useState("");
   const [filter, setFilter] = useState<FilterTab>("all");
   const [search, setSearch] = useState("");
+  const [filterOpen, setFilterOpen] = useState(false);
   const [modal, setModal] = useState<BillFormState>({ mode: "closed" });
   const [deleteTarget, setDeleteTarget] = useState<SupabaseBill | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -955,8 +1006,8 @@ export function BillsView() {
               <SummaryCard label="Remaining" value={formatCurrency(counts.remainingAmount)} sub="Unpaid bills" icon={ReceiptText} tone="sky" className="col-span-2 lg:col-span-1" />
             </div>
 
-            <div className="flex flex-col gap-3">
-              <div className="relative">
+            <div className="flex items-center gap-2">
+              <div className="relative min-w-0 flex-1">
                 <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
                 <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search bills, categories, wallets..." className="h-9 border-zinc-700 bg-zinc-900 pl-9 text-sm" />
                 {search && (
@@ -965,22 +1016,15 @@ export function BillsView() {
                   </button>
                 )}
               </div>
-
-              <div className="theme-pill-list no-scrollbar flex w-full snap-x snap-mandatory scroll-px-3 flex-nowrap items-center gap-2 overflow-x-auto overscroll-x-contain rounded-lg p-1.5 [-webkit-overflow-scrolling:touch] sm:w-fit sm:gap-1 sm:p-1">
-                {tabs.map((tab) => (
-                  <button
-                    key={tab.key}
-                    onClick={() => setFilter(tab.key)}
-                    className={cn(
-                      "flex min-h-10 min-w-max shrink-0 snap-start items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 py-2 text-xs font-medium leading-none transition-colors sm:min-h-8 sm:px-3 sm:py-1.5",
-                      filter === tab.key ? "theme-selected" : "theme-pill"
-                    )}
-                  >
-                    {tab.label}
-                    <span className="min-w-5 rounded px-1 text-center text-[10px] font-semibold leading-4 opacity-70">{tab.count}</span>
-                  </button>
-                ))}
-              </div>
+              <button
+                type="button"
+                onClick={() => setFilterOpen(true)}
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-zinc-900 text-zinc-500 ring-1 ring-zinc-800 transition-colors hover:bg-[var(--theme-primary-soft)] hover:text-[var(--theme-primary)]"
+                title="Filters"
+                aria-label="Open bill filters"
+              >
+                <SlidersHorizontal size={15} />
+              </button>
             </div>
 
             {filteredBills.length === 0 ? (
@@ -1032,6 +1076,14 @@ export function BillsView() {
           onSaved={() => loadBills(undefined, { silent: true })}
         />
       )}
+
+      <BillsFilterModal
+        open={filterOpen}
+        tabs={tabs}
+        value={filter}
+        onChange={setFilter}
+        onClose={() => setFilterOpen(false)}
+      />
 
       {deleteTarget && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
