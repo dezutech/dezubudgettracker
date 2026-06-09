@@ -17,7 +17,7 @@ export type DbWallet = {
   color: WalletColor | string;
   balance: number;    // maintained automatically on transaction CRUD
   currency: string;   // base currency code
-  limit?: number;     // credit cards only
+  limit?: number | null; // credit cards only
   icon?: string;
   logoUrl?: string;
   isArchived: boolean;

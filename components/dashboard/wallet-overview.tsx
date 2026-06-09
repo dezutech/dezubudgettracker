@@ -10,6 +10,7 @@ type WalletDisplay = {
   type: string;
   balance: number;
   color: string | null;
+  limit?: number;
   logo_url?: string | null;
 };
 
@@ -63,7 +64,11 @@ type WalletOverviewProps = { wallets: WalletDisplay[] };
 
 export function WalletOverview({ wallets }: WalletOverviewProps) {
   const { formatCurrency } = useCurrency();
-  const totalAssets = wallets.filter((w) => w.balance > 0).reduce((s, w) => s + w.balance, 0);
+  const isCreditWallet = (wallet: WalletDisplay) => {
+    const type = normalizeWalletType(wallet.type);
+    return type === "Credit Card" || type === "BNPL";
+  };
+  const totalAssets = wallets.filter((w) => !isCreditWallet(w) && w.balance > 0).reduce((s, w) => s + w.balance, 0);
   const netTotal    = wallets.reduce((s, w) => s + w.balance, 0);
   const visibleWallets = wallets.slice(0, 5);
 
@@ -87,9 +92,14 @@ export function WalletOverview({ wallets }: WalletOverviewProps) {
           visibleWallets.map((wallet) => {
             const Icon   = walletTypeIcon[normalizeWalletType(wallet.type)] ?? Banknote;
             const colors = walletAccent(wallet.color);
+            const walletType = normalizeWalletType(wallet.type);
+            const isCreditWallet = walletType === "Credit Card" || walletType === "BNPL";
             const isDebt = wallet.balance < 0;
-            const pct = isDebt
-              ? 0
+            const creditLimit = wallet.limit ?? 0;
+            const creditUsed = isCreditWallet ? Math.abs(wallet.balance) : 0;
+            const availableCredit = Math.max(0, creditLimit - creditUsed);
+            const pct = isCreditWallet
+              ? creditLimit > 0 ? Math.min(100, Math.round((creditUsed / creditLimit) * 100)) : 0
               : totalAssets > 0 ? Math.round((wallet.balance / totalAssets) * 100) : 0;
 
             return (
@@ -110,10 +120,16 @@ export function WalletOverview({ wallets }: WalletOverviewProps) {
                     <span className="text-sm font-medium text-card-foreground truncate">
                       {wallet.name}
                     </span>
-                    <span className={`ml-2 shrink-0 text-xs font-semibold sm:text-sm ${isDebt ? "text-rose-400" : "text-card-foreground"}`}>
-                      {isDebt ? "-" : ""}{formatCurrency(Math.abs(wallet.balance))}
+                    <span className={`ml-2 shrink-0 text-xs font-semibold sm:text-sm ${isCreditWallet || isDebt ? "text-rose-400" : "text-card-foreground"}`}>
+                      {isCreditWallet ? formatCurrency(creditUsed) : `${isDebt ? "-" : ""}${formatCurrency(Math.abs(wallet.balance))}`}
                     </span>
                   </div>
+                  {isCreditWallet && (
+                    <div className="mb-1 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+                      <span className="truncate">Available {formatCurrency(availableCredit)}</span>
+                      <span className="shrink-0">{pct}% used</span>
+                    </div>
+                  )}
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex-1 h-1 bg-zinc-800 rounded-full overflow-hidden">
                       <div className={`h-full rounded-full ${colors.bar}`} style={{ width: `${pct}%`, backgroundColor: colors.custom ? colors.hex : undefined }} />

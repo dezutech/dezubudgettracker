@@ -78,6 +78,11 @@ function getWalletColor(type: string): WalletColor {
   return TYPE_COLOR[normalizeWalletType(type)];
 }
 
+function isCreditWalletType(type: string) {
+  const normalized = normalizeWalletType(type);
+  return normalized === "Credit Card" || normalized === "BNPL";
+}
+
 function isSafeSvg(svg: string) {
   const lower = svg.toLowerCase();
   return !(
@@ -496,6 +501,7 @@ function AddWalletModal({
         name:       name.trim(),
         type,
         balance:    isDebtType ? -Math.abs(bal) : bal,
+        credit_limit: isDebtType ? Number(limit) : null,
         color,
         icon,
         logo_url:   logoUrl,
@@ -575,7 +581,7 @@ function AddWalletModal({
           <div className={cn("grid gap-3", isDebtType ? "grid-cols-2" : "grid-cols-1")}>
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-medium text-zinc-400">
-                {isDebtType ? "Current Debt" : "Initial Balance"}
+                {isDebtType ? "Current Amount Owed" : "Initial Balance"}
               </label>
               <div className="relative">
                 <CurrencyInputPrefix />
@@ -679,6 +685,7 @@ function EditWalletModal({
   const [name, setName] = useState("");
   const [type, setType] = useState<WalletType>("Cash");
   const [balance, setBalance] = useState("");
+  const [limit, setLimit] = useState("");
   const [color, setColor] = useState<string>("amber");
   const [icon, setIcon] = useState("wallet");
   const [manualColor, setManualColor] = useState(false);
@@ -692,10 +699,12 @@ function EditWalletModal({
   useEffect(() => {
     if (!wallet) return;
     const normalizedType = normalizeWalletType(wallet.type);
+    const isDebtType = isCreditWalletType(normalizedType);
     queueMicrotask(() => {
       setName(wallet.name);
       setType(normalizedType);
-      setBalance(String(wallet.balance));
+      setBalance(String(isDebtType ? Math.abs(wallet.balance) : wallet.balance));
+      setLimit(wallet.limit != null ? String(wallet.limit) : "");
       setColor((wallet.color as WalletColor | null) ?? getWalletColor(normalizedType));
       setIcon(wallet.icon ?? wallet.type ?? "wallet");
       setLogoMode(wallet.logo_url ? "logo" : "icon");
@@ -729,8 +738,16 @@ function EditWalletModal({
     if (!wallet) return;
     setError("");
     if (!name.trim()) { setError("Wallet name is required."); return; }
+    const isDebtType = isCreditWalletType(type);
     const parsedBalance = Number(balance);
     if (!balance.trim() || Number.isNaN(parsedBalance)) { setError("Enter a valid balance."); return; }
+    const parsedLimit = Number(limit);
+    if (isDebtType && (!limit.trim() || Number.isNaN(parsedLimit) || parsedLimit <= 0)) {
+      setError("Enter a valid credit limit.");
+      return;
+    }
+    const nextBalance = isDebtType ? -Math.abs(parsedBalance) : parsedBalance;
+    const nextLimit = isDebtType ? parsedLimit : null;
 
     setSaving(true);
     try {
@@ -742,12 +759,13 @@ function EditWalletModal({
         await updateWallet(Number(wallet.id), {
           name: name.trim(),
           type,
-          balance: parsedBalance,
+          balance: nextBalance,
+          limit: nextLimit,
           color,
           icon,
           logoUrl: nextLogoUrl,
         });
-        onSaved({ ...wallet, name: name.trim(), type, balance: parsedBalance, color, icon, logo_url: nextLogoUrl ?? null });
+        onSaved({ ...wallet, name: name.trim(), type, balance: nextBalance, limit: nextLimit ?? undefined, color, icon, logo_url: nextLogoUrl ?? null });
         onClose();
         return;
       }
@@ -759,7 +777,7 @@ function EditWalletModal({
           ? await uploadWalletLogo(userId, logoSelection.file)
           : logoUrl || null
         : null;
-      const payload = { name: name.trim(), type, balance: parsedBalance, color, icon, logo_url: nextLogoUrl };
+      const payload = { name: name.trim(), type, balance: nextBalance, credit_limit: nextLimit, color, icon, logo_url: nextLogoUrl };
       const { error: updateError } = await loggedSupabase(
         "wallets update",
         supabase
@@ -769,7 +787,7 @@ function EditWalletModal({
           .eq("user_id", userId)
       );
       if (updateError) { setError(updateError.message); return; }
-      onSaved({ ...wallet, ...payload });
+      onSaved({ ...wallet, ...payload, limit: nextLimit ?? undefined });
       onClose();
     } catch (error) {
       setError(error instanceof Error ? error.message : "Failed to update wallet.");
@@ -779,6 +797,7 @@ function EditWalletModal({
   }
 
   if (!wallet) return null;
+  const isDebtType = isCreditWalletType(type);
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center p-3 sm:p-4">
@@ -812,12 +831,25 @@ function EditWalletModal({
               ))}
             </div>
           </div>
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-zinc-400">Balance</label>
-            <div className="relative">
-              <CurrencyInputPrefix />
-              <Input type="number" value={balance} onChange={(e) => setBalance(e.target.value)} className="pl-10 bg-zinc-800 border-zinc-700 h-9" />
+          <div className={cn("grid gap-3", isDebtType ? "grid-cols-2" : "grid-cols-1")}>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium text-zinc-400">
+                {isDebtType ? "Current Amount Owed" : "Balance"}
+              </label>
+              <div className="relative">
+                <CurrencyInputPrefix />
+                <Input type="number" min="0" value={balance} onChange={(e) => setBalance(e.target.value)} className="pl-10 bg-zinc-800 border-zinc-700 h-9" />
+              </div>
             </div>
+            {isDebtType && (
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-medium text-zinc-400">Credit Limit</label>
+                <div className="relative">
+                  <CurrencyInputPrefix />
+                  <Input type="number" min="1" value={limit} onChange={(e) => setLimit(e.target.value)} className="pl-10 bg-zinc-800 border-zinc-700 h-9" />
+                </div>
+              </div>
+            )}
           </div>
           <WalletLogoControls
             mode={logoMode}
@@ -1186,6 +1218,7 @@ export function WalletsView() {
           type: normalizeWalletType(wallet.type),
           balance: wallet.balance,
           color: wallet.color,
+          limit: wallet.limit ?? undefined,
           icon: wallet.icon,
           logo_url: wallet.logoUrl ?? null,
           currency: wallet.currency,
@@ -1202,7 +1235,7 @@ export function WalletsView() {
         "wallets",
           supabase
             .from("wallets")
-            .select("id,name,type,balance,color,icon,logo_url,created_at")
+            .select("id,name,type,balance,credit_limit,color,icon,logo_url,created_at")
             .eq("user_id", userId)
             .eq("is_deleted", false)
           .order("created_at", { ascending: true })
@@ -1222,6 +1255,7 @@ export function WalletsView() {
           name: wallet.name,
           type: normalizeWalletType(wallet.type),
           balance: Number(wallet.balance),
+          limit: wallet.credit_limit != null ? Number(wallet.credit_limit) : undefined,
           color: wallet.color,
           icon: wallet.icon,
           logo_url: wallet.logo_url,

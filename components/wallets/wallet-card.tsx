@@ -152,12 +152,14 @@ export function WalletCard({
   const walletType = normalizeType(wallet.type);
   const { icon: Icon, label } = typeConfig[walletType];
   const colors = walletAccent(wallet.color, walletType);
+  const isCreditWallet = walletType === "Credit Card" || walletType === "BNPL";
   const isDebt = wallet.balance < 0;
 
-  const creditUsed     = wallet.limit ? Math.abs(wallet.balance) : 0;
-  const creditAvailable = wallet.limit ? wallet.limit - creditUsed : 0;
-  const utilizationPct = wallet.limit
-    ? Math.min(100, Math.round((creditUsed / wallet.limit) * 100))
+  const creditLimit = wallet.limit ?? 0;
+  const creditUsed = isCreditWallet ? Math.abs(wallet.balance) : 0;
+  const creditAvailable = isCreditWallet ? Math.max(0, creditLimit - creditUsed) : 0;
+  const utilizationPct = isCreditWallet && creditLimit > 0
+    ? Math.min(100, Math.round((creditUsed / creditLimit) * 100))
     : 0;
 
   useEffect(() => {
@@ -258,31 +260,45 @@ export function WalletCard({
         {/* name + balance */}
         <div className="flex min-w-0 flex-col gap-0.5">
           <p className="truncate text-xs font-medium text-muted-foreground sm:text-sm">{wallet.name}</p>
-          <p className={`truncate text-lg font-bold tracking-tight sm:text-2xl ${isDebt ? "text-rose-500 dark:text-rose-300" : "text-card-foreground"}`}>
-            {isDebt ? "-" : ""}{formatCurrency(wallet.balance)}
-          </p>
+          {isCreditWallet ? (
+            <div className="flex flex-col gap-0.5">
+              <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground sm:text-[11px]">
+                Amount Owed
+              </span>
+              <p className="truncate text-lg font-bold tracking-tight text-rose-500 dark:text-rose-300 sm:text-2xl">
+                {formatCurrency(creditUsed)}
+              </p>
+            </div>
+          ) : (
+            <p className={`truncate text-lg font-bold tracking-tight sm:text-2xl ${isDebt ? "text-rose-500 dark:text-rose-300" : "text-card-foreground"}`}>
+              {isDebt ? "-" : ""}{formatCurrency(wallet.balance)}
+            </p>
+          )}
         </div>
 
         {/* credit card utilization */}
-        {(walletType === "Credit Card" || walletType === "BNPL") && wallet.limit && (
-          <div className="hidden flex-col gap-2 sm:flex">
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-muted-foreground">
-                {formatCurrency(creditAvailable)} available
-              </span>
-              <span className={`font-semibold ${utilizationPct > 70 ? "text-rose-400" : "text-muted-foreground"}`}>
-                {utilizationPct}% used
-              </span>
+        {isCreditWallet && (
+          <div className="flex flex-col gap-2">
+            <div className="grid grid-cols-2 gap-2 text-[11px] sm:text-xs">
+              <div className="min-w-0">
+                <p className="truncate text-muted-foreground">Available Credit</p>
+                <p className="truncate font-semibold tabular-nums text-card-foreground">
+                  {formatCurrency(creditAvailable)}
+                </p>
+              </div>
+              <div className="min-w-0 text-right">
+                <p className="truncate text-muted-foreground">Used Credit</p>
+                <p className={`truncate font-semibold tabular-nums ${utilizationPct >= 80 ? "text-rose-400" : "text-card-foreground"}`}>
+                  {utilizationPct}%
+                </p>
+              </div>
             </div>
-            <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+            <div className="h-1.5 overflow-hidden rounded-full bg-muted" aria-label={`Used credit ${utilizationPct}%`}>
               <div
-                className={`h-full rounded-full transition-all ${utilizationPct > 70 ? "bg-rose-400" : "bg-rose-500/60"}`}
+                className={`h-full rounded-full transition-all ${utilizationPct >= 80 ? "bg-rose-400" : "bg-primary"}`}
                 style={{ width: `${utilizationPct}%` }}
               />
             </div>
-            <p className="text-[11px] text-muted-foreground">
-              {formatCurrency(creditUsed)} of {formatCurrency(wallet.limit)} limit
-            </p>
           </div>
         )}
 

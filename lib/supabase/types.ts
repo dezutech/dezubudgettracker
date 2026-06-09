@@ -88,6 +88,7 @@ export interface Database {
           name: string;
           type: string;
           balance: number;
+          credit_limit: number | null;
           color: string | null;
           icon: string | null;
           logo_url: string | null;
@@ -96,6 +97,7 @@ export interface Database {
           name: string;
           type: string;
           balance?: number;
+          credit_limit?: number | null;
           color?: string | null;
           icon?: string | null;
           logo_url?: string | null;
@@ -104,6 +106,7 @@ export interface Database {
           name?: string;
           type?: string;
           balance?: number;
+          credit_limit?: number | null;
           color?: string | null;
           icon?: string | null;
           logo_url?: string | null;

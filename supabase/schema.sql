@@ -54,6 +54,7 @@ create table if not exists public.wallets (
   name text not null,
   type text not null,
   balance numeric(14, 2) not null default 0,
+  credit_limit numeric(14, 2),
   color text,
   icon text,
   logo_url text,
@@ -63,7 +64,8 @@ create table if not exists public.wallets (
   synced_at timestamptz,
   is_deleted boolean not null default false,
   constraint wallets_name_not_blank check (length(btrim(name)) > 0),
-  constraint wallets_type_not_blank check (length(btrim(type)) > 0)
+  constraint wallets_type_not_blank check (length(btrim(type)) > 0),
+  constraint wallets_credit_limit_non_negative check (credit_limit is null or credit_limit >= 0)
 );
 
 create table if not exists public.categories (

@@ -227,6 +227,7 @@ function walletPayload(userId: string, wallet: DbWallet) {
     name: wallet.name,
     type: wallet.type,
     balance: wallet.balance,
+    credit_limit: wallet.limit ?? null,
     color: wallet.color ?? null,
     icon: wallet.icon ?? null,
     logo_url: wallet.logoUrl ?? null,

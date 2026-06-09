@@ -60,7 +60,7 @@ const EMPTY: {
   billSummary: DashboardBillSummary;
   debtSummary: DashboardDebtSummary;
   goals: DashboardGoalSummary[];
-  wallets: Array<{ id: string | number; name: string; type: string; balance: number; color: string | null; logo_url: string | null }>;
+  wallets: Array<{ id: string | number; name: string; type: string; balance: number; color: string | null; limit?: number; logo_url: string | null }>;
 } = {
   netWorth: 0, monthIncome: 0, monthExpenses: 0,
   netSavings: 0, savingsRate: 0,
@@ -92,6 +92,7 @@ type SupabaseWallet = {
   name: string;
   type: string;
   balance: number | string;
+  credit_limit: number | string | null;
   color: string | null;
   logo_url: string | null;
 };
@@ -1029,7 +1030,7 @@ export function DashboardView() {
 
       const supabase = createClient();
       const [walletSettled, txSettled, categorySettled, budgetSettled, goalSettled, billSettled, debtSettled] = await Promise.allSettled([
-        loggedSupabase("wallets", supabase.from("wallets").select("id,name,type,balance,color,logo_url").eq("user_id", user.id).eq("is_deleted", false)),
+        loggedSupabase("wallets", supabase.from("wallets").select("id,name,type,balance,credit_limit,color,logo_url").eq("user_id", user.id).eq("is_deleted", false)),
         loggedSupabase("transactions", supabase.from("transactions").select("id,wallet_id,destination_wallet_id,category_id,amount,transaction_type,description,transaction_date").eq("user_id", user.id).eq("is_deleted", false)),
         loggedSupabase("categories", supabase.from("categories").select("id,name,icon,color").eq("user_id", user.id).eq("is_deleted", false)),
         loggedSupabase("budgets", supabase.from("budgets").select("id,category_id,amount,month").eq("user_id", user.id).eq("is_deleted", false)),
@@ -1056,6 +1057,7 @@ export function DashboardView() {
       const wallets = ((walletResult.data ?? []) as SupabaseWallet[]).map((wallet) => ({
         ...wallet,
         balance: Number(wallet.balance),
+        limit: wallet.credit_limit != null ? Number(wallet.credit_limit) : undefined,
       }));
       const transactions = (txResult.data ?? []) as SupabaseTransaction[];
       const categories = (categoryResult.data ?? []) as SupabaseCategory[];
@@ -1258,6 +1260,7 @@ export function DashboardView() {
           type: wallet.type,
           balance: wallet.balance,
           color: wallet.color,
+          limit: wallet.limit ?? undefined,
           logo_url: wallet.logoUrl ?? null,
         })),
       }

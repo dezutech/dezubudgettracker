@@ -5,9 +5,12 @@ import { useCurrency } from "@/context/currency-context";
 
 export function WalletSummary({ wallets }: { wallets: WalletDisplay[] }) {
   const { formatCurrency } = useCurrency();
-  const assets   = wallets.filter((w) => w.balance > 0).reduce((s, w) => s + w.balance, 0);
-  const debt     = wallets.filter((w) => w.balance < 0).reduce((s, w) => s + Math.abs(w.balance), 0);
+  const isCreditWallet = (wallet: WalletDisplay) => wallet.type === "Credit Card" || wallet.type === "BNPL";
+  const assets   = wallets.filter((w) => !isCreditWallet(w) && w.balance > 0).reduce((s, w) => s + w.balance, 0);
+  const debt     = wallets.filter(isCreditWallet).reduce((s, w) => s + Math.abs(w.balance), 0);
   const netWorth = assets - debt;
+  const assetCount = wallets.filter((w) => !isCreditWallet(w) && w.balance >= 0).length;
+  const creditCount = wallets.filter(isCreditWallet).length;
 
   const items = [
     {
@@ -17,7 +20,7 @@ export function WalletSummary({ wallets }: { wallets: WalletDisplay[] }) {
       icon:       Wallet,
       iconColor:  "text-emerald-400",
       iconBg:     "bg-emerald-500/10",
-      sub:        `${wallets.filter((w) => w.balance >= 0).length} account${wallets.filter((w) => w.balance >= 0).length !== 1 ? "s" : ""}`,
+      sub:        `${assetCount} account${assetCount !== 1 ? "s" : ""}`,
     },
     {
       label:      "Total Debt",
@@ -26,7 +29,7 @@ export function WalletSummary({ wallets }: { wallets: WalletDisplay[] }) {
       icon:       TrendingDown,
       iconColor:  "text-rose-400",
       iconBg:     "bg-rose-500/10",
-      sub:        `${wallets.filter((w) => w.balance < 0).length} credit card`,
+      sub:        `${creditCount} credit wallet${creditCount !== 1 ? "s" : ""}`,
     },
     {
       label:      "Net Worth",
