@@ -22,6 +22,7 @@ import { createClient } from "@/lib/supabase/client";
 import { loggedSupabase } from "@/lib/supabase/query";
 import { useAuth } from "@/context/auth-context";
 import { useCurrency } from "@/context/currency-context";
+import { CurrencyInputPrefix } from "@/components/ui/currency-input-prefix";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { archiveWallet, createTransaction, createWallet, getWallets, updateWallet, type WalletType, type WalletColor } from "@/lib/db";
@@ -397,7 +398,7 @@ function AddWalletModal({
   onClose: () => void;
   onCreated: () => void;
 }) {
-  const { currency, symbol } = useCurrency();
+  const { currency } = useCurrency();
   const [name, setName]       = useState("");
   const [type, setType]       = useState<WalletType>("Bank Account");
   const [balance, setBalance] = useState("");
@@ -577,14 +578,14 @@ function AddWalletModal({
                 {isDebtType ? "Current Debt" : "Initial Balance"}
               </label>
               <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-zinc-500 font-medium">{symbol}</span>
+                <CurrencyInputPrefix />
                 <Input
                   type="number"
                   min="0"
                   placeholder="0.00"
                   value={balance}
                   onChange={(e) => setBalance(e.target.value)}
-                  className="pl-7 bg-zinc-800 border-zinc-700 h-9"
+                  className="pl-10 bg-zinc-800 border-zinc-700 h-9"
                 />
               </div>
             </div>
@@ -592,14 +593,14 @@ function AddWalletModal({
               <div className="flex flex-col gap-1.5">
                 <label className="text-xs font-medium text-zinc-400">Credit Limit</label>
                 <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-zinc-500 font-medium">{symbol}</span>
+                  <CurrencyInputPrefix />
                   <Input
                     type="number"
                     min="1"
                     placeholder="25,000"
                     value={limit}
                     onChange={(e) => setLimit(e.target.value)}
-                    className="pl-7 bg-zinc-800 border-zinc-700 h-9"
+                    className="pl-10 bg-zinc-800 border-zinc-700 h-9"
                   />
                 </div>
               </div>
@@ -814,8 +815,8 @@ function EditWalletModal({
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium text-zinc-400">Balance</label>
             <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-zinc-500 font-medium">â‚±</span>
-              <Input type="number" value={balance} onChange={(e) => setBalance(e.target.value)} className="pl-7 bg-zinc-800 border-zinc-700 h-9" />
+              <CurrencyInputPrefix />
+              <Input type="number" value={balance} onChange={(e) => setBalance(e.target.value)} className="pl-10 bg-zinc-800 border-zinc-700 h-9" />
             </div>
           </div>
           <WalletLogoControls
@@ -915,7 +916,7 @@ function TransferWalletModal({
   onClose: () => void;
   onTransferred: (fromId: string, toId: string, amount: number) => void;
 }) {
-  const { formatCurrency, symbol } = useCurrency();
+  const { formatCurrency } = useCurrency();
   const [fromWalletId, setFromWalletId] = useState("");
   const [toWalletId, setToWalletId] = useState("");
   const [amount, setAmount] = useState("");
@@ -1111,8 +1112,8 @@ function TransferWalletModal({
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-medium text-zinc-400">Amount</label>
               <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-zinc-500 font-medium">{symbol}</span>
-                <Input type="number" min="0.01" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" className="pl-7 bg-zinc-800 border-zinc-700 h-9" />
+                <CurrencyInputPrefix />
+                <Input type="number" min="0.01" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" className="pl-10 bg-zinc-800 border-zinc-700 h-9" />
               </div>
               {exceedsBalance && (
                 <p className="text-[11px] text-amber-400">

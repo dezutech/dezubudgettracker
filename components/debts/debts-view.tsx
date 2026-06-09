@@ -24,6 +24,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { CurrencyInputPrefix } from "@/components/ui/currency-input-prefix";
 import { useAuth } from "@/context/auth-context";
 import { useCurrency } from "@/context/currency-context";
 import { cn } from "@/lib/utils";
@@ -486,13 +487,19 @@ function DebtModal({
 
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-medium text-muted-foreground">Original amount</label>
-              <Input type="number" min="0.01" step="0.01" value={originalAmount} onChange={(e) => setOriginalAmount(e.target.value)} placeholder="0.00" className="h-9" />
+              <div className="relative">
+                <CurrencyInputPrefix />
+                <Input type="number" min="0.01" step="0.01" value={originalAmount} onChange={(e) => setOriginalAmount(e.target.value)} placeholder="0.00" className="h-9 pl-10" />
+              </div>
             </div>
 
             {isEdit && (
               <div className="flex flex-col gap-1.5 sm:col-span-2">
                 <label className="text-xs font-medium text-muted-foreground">Remaining balance</label>
-                <Input type="number" min="0" step="0.01" value={remainingBalance} onChange={(e) => setRemainingBalance(e.target.value)} placeholder="0.00" className="h-9" />
+                <div className="relative">
+                  <CurrencyInputPrefix />
+                  <Input type="number" min="0" step="0.01" value={remainingBalance} onChange={(e) => setRemainingBalance(e.target.value)} placeholder="0.00" className="h-9 pl-10" />
+                </div>
               </div>
             )}
 
@@ -671,7 +678,10 @@ function PaymentModal({
           <div>
             <label className="text-xs font-medium text-muted-foreground">Amount</label>
               <div className="mt-1.5 flex gap-2">
-                <Input type="number" min="0.01" max={remaining} step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} className="h-10" placeholder="0.00" />
+                <div className="relative flex-1">
+                  <CurrencyInputPrefix />
+                  <Input type="number" min="0.01" max={remaining} step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} className="h-10 pl-10" placeholder="0.00" />
+                </div>
                 <button type="button" onClick={() => setAmount(String(remaining))} className="shrink-0 rounded-lg border border-border bg-background px-3 text-xs font-semibold text-foreground transition-colors hover:bg-muted">
                   Full
                 </button>

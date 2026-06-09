@@ -20,6 +20,7 @@ import {
 import { loggedSupabase, settledError } from "@/lib/supabase/query";
 import { useAuth } from "@/context/auth-context";
 import { useCurrency } from "@/context/currency-context";
+import { CurrencyInputPrefix } from "@/components/ui/currency-input-prefix";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -393,7 +394,6 @@ function AddEditModal({
   onClose: () => void;
   onSaved: (item?: AppRecurring) => void;
 }) {
-  const { symbol } = useCurrency();
   const isEdit = state.mode === "edit";
 
   const [title,       setTitle]       = useState("");
@@ -607,7 +607,7 @@ function AddEditModal({
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Amount</label>
             <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-zinc-400 pointer-events-none">{symbol}</span>
+              <CurrencyInputPrefix className="text-zinc-400" />
               <input
                 type="number"
                 min="1"
@@ -615,7 +615,7 @@ function AddEditModal({
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 placeholder="0"
-                className="h-9 w-full rounded-lg border border-zinc-700 bg-zinc-800 pl-7 pr-3 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500/60 transition-colors"
+                className="h-9 w-full rounded-lg border border-zinc-700 bg-zinc-800 pl-10 pr-3 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500/60 transition-colors"
               />
             </div>
           </div>

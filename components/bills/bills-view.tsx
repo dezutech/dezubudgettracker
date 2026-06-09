@@ -17,6 +17,7 @@ import {
   X,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { CurrencyInputPrefix } from "@/components/ui/currency-input-prefix";
 import { useAuth } from "@/context/auth-context";
 import { useCurrency } from "@/context/currency-context";
 import { cn } from "@/lib/utils";
@@ -484,7 +485,10 @@ function BillModal({
 
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-medium text-zinc-400">Amount</label>
-              <Input type="number" min="0.01" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" className="h-9 border-zinc-700 bg-zinc-800" />
+              <div className="relative">
+                <CurrencyInputPrefix />
+                <Input type="number" min="0.01" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" className="h-9 border-zinc-700 bg-zinc-800 pl-10" />
+              </div>
             </div>
 
             <div className="flex flex-col gap-1.5">

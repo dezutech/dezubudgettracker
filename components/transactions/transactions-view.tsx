@@ -11,6 +11,7 @@ import {
   Loader2, SlidersHorizontal, ArrowLeftRight,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { CurrencyInputPrefix } from "@/components/ui/currency-input-prefix";
 import { createClient } from "@/lib/supabase/client";
 import { ensureSupabaseDefaultCategories } from "@/lib/supabase/categories";
 import { loggedSupabase, settledError } from "@/lib/supabase/query";
@@ -355,7 +356,6 @@ function AddTransactionModal({
   isOffline: boolean;
   onCreated: () => void;
 }) {
-  const { symbol } = useCurrency();
   const [txType,    setTxType]    = useState<"expense" | "income">("expense");
   const [amount,    setAmount]    = useState("");
   const [name,      setName]      = useState("");
@@ -511,11 +511,11 @@ function AddTransactionModal({
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium text-zinc-400">Amount</label>
             <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-zinc-500 font-medium">{symbol}</span>
+              <CurrencyInputPrefix />
               <Input
                 type="number" min="0.01" step="0.01" placeholder="0.00"
                 value={amount} onChange={(e) => setAmount(e.target.value)}
-                className="pl-7 bg-zinc-800 border-zinc-700 h-9"
+                className="pl-10 bg-zinc-800 border-zinc-700 h-9"
               />
             </div>
           </div>
@@ -761,7 +761,10 @@ function EditTransactionModal({
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-medium text-zinc-400">Amount</label>
-              <Input type="number" min="0.01" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} className="bg-zinc-800 border-zinc-700 h-9" />
+              <div className="relative">
+                <CurrencyInputPrefix />
+                <Input type="number" min="0.01" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} className="pl-10 bg-zinc-800 border-zinc-700 h-9" />
+              </div>
             </div>
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-medium text-zinc-400">Date</label>
@@ -907,7 +910,7 @@ type TypeFilter = "all" | "income" | "expense" | "transfer";
 
 export function TransactionsView() {
   const searchParams = useSearchParams();
-  const { formatCurrency, symbol } = useCurrency();
+  const { formatCurrency } = useCurrency();
   const { user, loading: authLoading, isLoggingOut, isGuest } = useAuth();
   const [rawTxs, setRawTxs] = useState<SupabaseTransaction[]>([]);
   const [wallets, setWallets] = useState<SupabaseWallet[]>([]);

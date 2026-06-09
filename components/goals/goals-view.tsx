@@ -10,6 +10,7 @@ import {
   CheckCircle2, ChevronDown, ChevronUp, Search, SlidersHorizontal,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { CurrencyInputPrefix } from "@/components/ui/currency-input-prefix";
 import { createClient } from "@/lib/supabase/client";
 import { loggedSupabase, settledError } from "@/lib/supabase/query";
 import { useAuth } from "@/context/auth-context";
@@ -365,7 +366,7 @@ function ContributeModal({
   onClose: () => void;
   onSaved: () => void | Promise<void>;
 }) {
-  const { formatCurrency, symbol } = useCurrency();
+  const { formatCurrency } = useCurrency();
   const [mode,    setMode]    = useState<"contribute" | "withdraw">("contribute");
   const [amount,  setAmount]  = useState("");
   const [fromWalletId, setFromWalletId] = useState("");
@@ -632,7 +633,7 @@ function ContributeModal({
           <div className="flex flex-col gap-2">
             <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Amount</label>
             <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-zinc-400 pointer-events-none">{symbol}</span>
+              <CurrencyInputPrefix className="text-zinc-400" />
               <input
                 type="number"
                 min="1"
@@ -640,7 +641,7 @@ function ContributeModal({
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 placeholder="0"
-                className="h-10 w-full rounded-lg border border-zinc-700 bg-zinc-800 pl-7 pr-3 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500/60 transition-colors"
+                className="h-10 w-full rounded-lg border border-zinc-700 bg-zinc-800 pl-10 pr-3 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500/60 transition-colors"
                 autoFocus
               />
             </div>
@@ -769,7 +770,6 @@ function AddEditModal({
   onClose: () => void;
   onSaved: (goal?: AppGoal) => void;
 }) {
-  const { symbol } = useCurrency();
   const isEdit = state.mode === "edit";
 
   const [name,          setName]          = useState("");
@@ -974,26 +974,26 @@ function AddEditModal({
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Target Amount</label>
               <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-zinc-400 pointer-events-none">{symbol}</span>
+                <CurrencyInputPrefix className="text-zinc-400" />
                 <input
                   type="number" min="1" step="1"
                   value={targetAmount}
                   onChange={(e) => setTargetAmount(e.target.value)}
                   placeholder="0"
-                  className="h-9 w-full rounded-lg border border-zinc-700 bg-zinc-800 pl-7 pr-3 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500/60 transition-colors"
+                  className="h-9 w-full rounded-lg border border-zinc-700 bg-zinc-800 pl-10 pr-3 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500/60 transition-colors"
                 />
               </div>
             </div>
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Current Amount</label>
               <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-zinc-400 pointer-events-none">{symbol}</span>
+                <CurrencyInputPrefix className="text-zinc-400" />
                 <input
                   type="number" min="0" step="1"
                   value={currentAmount}
                   onChange={(e) => setCurrentAmount(e.target.value)}
                   placeholder="0"
-                  className="h-9 w-full rounded-lg border border-zinc-700 bg-zinc-800 pl-7 pr-3 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500/60 transition-colors"
+                  className="h-9 w-full rounded-lg border border-zinc-700 bg-zinc-800 pl-10 pr-3 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500/60 transition-colors"
                 />
               </div>
             </div>
