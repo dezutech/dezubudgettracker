@@ -79,12 +79,12 @@ type DisplayTx = {
   walletName: string;
 };
 
-type SupabaseWallet = {
+export type SupabaseWallet = {
   id: string;
   name: string;
 };
 
-type SupabaseCategory = {
+export type SupabaseCategory = {
   id: string;
   name: string;
   type: "income" | "expense";
@@ -384,7 +384,7 @@ function MobileFilterSheet({
   );
 }
 
-function AddTransactionModal({
+export function AddTransactionModal({
   open,
   onClose,
   wallets,

@@ -23,6 +23,7 @@ import {
   Clock3,
   Loader2,
   PiggyBank,
+  Plus,
   ReceiptText,
   HandCoins,
   Target,
@@ -32,11 +33,12 @@ import { createClient } from "@/lib/supabase/client";
 import { loggedSupabase, settledError } from "@/lib/supabase/query";
 import { useAuth } from "@/context/auth-context";
 import { useCurrency } from "@/context/currency-context";
-import { useDashboardData as useLocalDashboardData } from "@/lib/db/hooks";
+import { useCategories, useDashboardData as useLocalDashboardData, useWallets } from "@/lib/db/hooks";
 import { OFFLINE_USER_ID } from "@/lib/offline/constants";
 import { cn } from "@/lib/utils";
 import { RecentTransactions, type DashboardRecentTx } from "./recent-transactions";
 import type { DashboardTopCategory } from "./top-categories";
+import { AddTransactionModal, type SupabaseCategory as AddTransactionCategory, type SupabaseWallet as AddTransactionWallet } from "@/components/transactions/transactions-view";
 
 type SpendingPeriod = "week" | "month" | "year";
 type FinancialChartType = "bar" | "line";
@@ -119,6 +121,7 @@ type SupabaseWallet = {
 type SupabaseCategory = {
   id: string;
   name: string;
+  type: "income" | "expense";
   icon: string | null;
   color: string | null;
 };
@@ -1205,8 +1208,12 @@ export function DashboardView() {
   const [data, setData] = useState<typeof EMPTY | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
+  const [addOpen, setAddOpen] = useState(false);
+  const [cloudAddCategories, setCloudAddCategories] = useState<AddTransactionCategory[]>([]);
   const loadRequestId = useRef(0);
   const localDashboard = useLocalDashboardData(month, isGuest ? OFFLINE_USER_ID : user?.id ?? "__cloud__");
+  const localWallets = useWallets(isGuest ? OFFLINE_USER_ID : "__cloud__");
+  const localCategories = useCategories(isGuest ? OFFLINE_USER_ID : "__cloud__");
 
   const loadDashboard = useCallback(async (isMounted?: () => boolean) => {
     const requestId = ++loadRequestId.current;
@@ -1233,7 +1240,7 @@ export function DashboardView() {
       const [walletSettled, txSettled, categorySettled, budgetSettled, goalSettled, billSettled, debtSettled] = await Promise.allSettled([
         loggedSupabase("wallets", supabase.from("wallets").select("id,name,type,balance,credit_limit,color,logo_url").eq("user_id", user.id).eq("is_deleted", false)),
         loggedSupabase("transactions", supabase.from("transactions").select("id,wallet_id,destination_wallet_id,category_id,amount,transaction_type,description,transaction_date").eq("user_id", user.id).eq("is_deleted", false)),
-        loggedSupabase("categories", supabase.from("categories").select("id,name,icon,color").eq("user_id", user.id).eq("is_deleted", false)),
+        loggedSupabase("categories", supabase.from("categories").select("id,name,type,icon,color").eq("user_id", user.id).eq("is_deleted", false)),
         loggedSupabase("budgets", supabase.from("budgets").select("id,category_id,amount,month").eq("user_id", user.id).eq("is_deleted", false)),
         loggedSupabase("goals", supabase.from("goals").select("id,name,target_amount,current_amount,target_date,status").eq("user_id", user.id).eq("is_deleted", false)),
         loggedSupabase("bills", supabase.from("bills").select("id,title,amount,due_date,status,is_recurring,recurring_id").eq("user_id", user.id).eq("is_deleted", false)),
@@ -1262,6 +1269,7 @@ export function DashboardView() {
       }));
       const transactions = (txResult.data ?? []) as SupabaseTransaction[];
       const categories = (categoryResult.data ?? []) as SupabaseCategory[];
+      setCloudAddCategories(categories);
       const budgets = (budgetResult.data ?? []) as SupabaseBudget[];
       const goals = (goalResult.data ?? []) as SupabaseGoal[];
       const bills = (billResult.data ?? []) as SupabaseBill[];
@@ -1480,11 +1488,27 @@ export function DashboardView() {
     : EMPTY;
   const stats = isGuest ? localStats : data ?? EMPTY;
   const pageLoading = isGuest ? localDashboard.loading : loading;
+  const addWallets: AddTransactionWallet[] = isGuest
+    ? localWallets.wallets.map((wallet) => ({ id: String(wallet.id), name: wallet.name }))
+    : stats.wallets.map((wallet) => ({ id: String(wallet.id), name: wallet.name }));
+  const addCategories: AddTransactionCategory[] = isGuest
+    ? localCategories.categories.map((category) => ({
+        id: String(category.id),
+        name: category.name,
+        type: category.type === "both" ? "expense" : category.type,
+        icon: category.icon,
+        color: category.color,
+      }))
+    : cloudAddCategories;
   const handleShiftMonth = useCallback((delta: number) => {
     setMonth((m) => shiftMonth(m, delta));
   }, []);
+  const handleTransactionCreated = useCallback(() => {
+    if (!isGuest) void loadDashboard(undefined);
+  }, [isGuest, loadDashboard]);
 
   return (
+    <>
     <div className="mx-auto max-w-6xl space-y-3 px-4 py-3 sm:space-y-6 sm:px-5 sm:py-7">
       {/* header */}
       <div className="flex items-center justify-between gap-3">
@@ -1541,5 +1565,27 @@ export function DashboardView() {
         </>
       )}
     </div>
+
+      {!pageLoading && !loadError && (
+        <button
+          type="button"
+          aria-label="Add Transaction"
+          onClick={() => setAddOpen(true)}
+          className="theme-selected fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] right-4 z-40 flex h-14 w-14 items-center justify-center rounded-full shadow-2xl ring-1 ring-white/25 transition-transform active:scale-95 md:hidden"
+        >
+          <Plus size={26} strokeWidth={2.5} />
+        </button>
+      )}
+
+      <AddTransactionModal
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        wallets={addWallets}
+        categories={addCategories}
+        userId={user?.id ?? null}
+        isOffline={isGuest}
+        onCreated={handleTransactionCreated}
+      />
+    </>
   );
 }
