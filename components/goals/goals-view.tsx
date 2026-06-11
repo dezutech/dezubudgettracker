@@ -60,6 +60,9 @@ type SupabaseGoalRow = {
   wallet_id?: string | null;
   target_date: string | null;
   status: GoalStatus;
+  icon?: string | null;
+  color?: string | null;
+  notes?: string | null;
 };
 
 function mapGoal(row: SupabaseGoalRow): AppGoal {
@@ -72,8 +75,9 @@ function mapGoal(row: SupabaseGoalRow): AppGoal {
     walletId: row.wallet_id ?? null,
     targetDate: row.target_date ?? todayIso(),
     status: row.status,
-    icon: "Target",
-    color: "emerald",
+    icon: row.icon ?? "Target",
+    color: row.color ?? "emerald",
+    notes: row.notes ?? undefined,
   };
 }
 
@@ -868,6 +872,9 @@ function AddEditModal({
           wallet_id: walletId || null,
           target_date: targetDate,
           status,
+          icon,
+          color,
+          notes: notes.trim() || null,
           })
         );
 
@@ -888,6 +895,9 @@ function AddEditModal({
           wallet_id: walletId || null,
           target_date: targetDate,
           status,
+          icon,
+          color,
+          notes: notes.trim() || null,
         };
         const { data: updatedRows, error: updateError } = await loggedSupabase(
           "goals update",
@@ -896,7 +906,7 @@ function AddEditModal({
             .update(payload)
             .eq("id", state.goal.id)
             .eq("user_id", userId)
-            .select("id,user_id,name,target_amount,current_amount,wallet_id,target_date,status")
+            .select("id,user_id,name,target_amount,current_amount,wallet_id,target_date,status,icon,color,notes")
         );
 
         if (updateError) {
@@ -1261,7 +1271,7 @@ export function GoalsView() {
           "goals",
           supabase
             .from("goals")
-            .select("id,user_id,name,target_amount,current_amount,wallet_id,target_date,status")
+            .select("id,user_id,name,target_amount,current_amount,wallet_id,target_date,status,icon,color,notes")
             .eq("user_id", user.id)
             .eq("is_deleted", false)
             .order("target_date", { ascending: true })

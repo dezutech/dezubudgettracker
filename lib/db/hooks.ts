@@ -208,6 +208,13 @@ export type DashboardTopCategory = {
   percentage: number;
 };
 
+export type DashboardFinancialPoint = {
+  label: string;
+  income: number;
+  expenses: number;
+  netCashFlow: number;
+};
+
 export type DashboardData = {
   netWorth: number;
   monthIncome: number;
@@ -218,6 +225,11 @@ export type DashboardData = {
   expensesTrend: number;
   savingsTrend: number;
   chartData: Array<{ month: string; income: number; expenses: number }>;
+  financialOverview: {
+    week: DashboardFinancialPoint[];
+    month: DashboardFinancialPoint[];
+    year: DashboardFinancialPoint[];
+  };
   topCategories: DashboardTopCategory[];
   spendingCategories: {
     week: DashboardTopCategory[];
@@ -279,6 +291,12 @@ function sumByType(txs: DbTransaction[], type: TransactionType): number {
   return txs.filter((t) => t.type === type).reduce((s, t) => s + t.amount, 0);
 }
 
+function summarizeFinancialPoint(label: string, txs: DbTransaction[]): DashboardFinancialPoint {
+  const income = sumByType(txs, "income");
+  const expenses = sumByType(txs, "expense");
+  return { label, income, expenses, netCashFlow: income - expenses };
+}
+
 function todayIso() {
   return new Date().toISOString().split("T")[0];
 }
@@ -300,6 +318,47 @@ function weekRange(): { start: string; end: string } {
 function yearRange(month: string): { start: string; end: string } {
   const [year] = month.split("-").map(Number);
   return { start: `${year}-01-01`, end: `${year}-12-31` };
+}
+
+function toIsoDate(date: Date): string {
+  return date.toISOString().split("T")[0];
+}
+
+function buildFinancialOverview(txs: DbTransaction[], month: string) {
+  const week = weekRange();
+  const weekStart = new Date(week.start + "T00:00:00");
+  const [yearValue, monthValue] = month.split("-").map(Number);
+  const daysInMonth = new Date(yearValue, monthValue, 0).getDate();
+
+  return {
+    week: Array.from({ length: 7 }, (_, index) => {
+      const date = new Date(weekStart);
+      date.setDate(weekStart.getDate() + index);
+      const iso = toIsoDate(date);
+      return summarizeFinancialPoint(
+        date.toLocaleDateString("en-US", { weekday: "short" }),
+        txs.filter((tx) => tx.date === iso)
+      );
+    }),
+    month: Array.from({ length: Math.ceil(daysInMonth / 7) }, (_, index) => {
+      const startDay = index * 7 + 1;
+      const endDay = Math.min(startDay + 6, daysInMonth);
+      const start = `${month}-${String(startDay).padStart(2, "0")}`;
+      const end = `${month}-${String(endDay).padStart(2, "0")}`;
+      return summarizeFinancialPoint(
+        `W${index + 1}`,
+        txs.filter((tx) => tx.date >= start && tx.date <= end)
+      );
+    }),
+    year: Array.from({ length: 12 }, (_, index) => {
+      const itemMonth = `${yearValue}-${String(index + 1).padStart(2, "0")}`;
+      const range = monthRange(itemMonth);
+      return summarizeFinancialPoint(
+        shortMonthLabel(itemMonth),
+        txs.filter((tx) => tx.date >= range.start && tx.date <= range.end)
+      );
+    }),
+  };
 }
 
 function summarizeSpendingCategories(
@@ -450,6 +509,7 @@ export function useDashboardData(month: string, userId = OFFLINE_USER_ID) {
           expenses: sumByType(txs, "expense"),
         };
       });
+      const financialOverview = buildFinancialOverview(scopedTxs, month);
 
       // Top spending categories this month
       const catTotals = new Map<number, number>();
@@ -515,6 +575,7 @@ export function useDashboardData(month: string, userId = OFFLINE_USER_ID) {
         expensesTrend: pctChange(monthExpenses, prevExpenses),
         savingsTrend:  pctChange(netSavings,    prevSavings),
         chartData,
+        financialOverview,
         topCategories,
         spendingCategories: {
           week: summarizeSpendingCategories(scopedTxs, cats, week.start, week.end),

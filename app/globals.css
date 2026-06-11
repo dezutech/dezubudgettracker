@@ -478,6 +478,12 @@
     background-color: color-mix(in oklch, var(--muted) 88%, white);
   }
 
+  .light .bg-zinc-800\/60,
+  .light .bg-zinc-800\/50,
+  .light .bg-zinc-700\/70 {
+    background-color: color-mix(in oklch, var(--muted) 72%, white);
+  }
+
   .light .border-zinc-800,
   .light .border-zinc-700 {
     border-color: var(--border);

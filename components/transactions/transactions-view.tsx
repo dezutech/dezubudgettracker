@@ -8,7 +8,7 @@ import {
   Utensils, Zap, ShoppingCart, Tv, Car, ShoppingBag,
   Heart, BookOpen, Home, Repeat, MoreHorizontal,
   Briefcase, Laptop, Gift, CirclePlus, HelpCircle,
-  Loader2, SlidersHorizontal, ArrowLeftRight,
+  Loader2, SlidersHorizontal, ArrowLeftRight, Pencil, Trash2,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { CurrencyInputPrefix } from "@/components/ui/currency-input-prefix";
@@ -105,6 +105,8 @@ type SupabaseTransaction = {
   description: string | null;
   notes: string | null;
   transaction_date: string;
+  created_at?: string;
+  updated_at?: string;
 };
 
 function localWalletToSupabase(wallet: DbWallet): SupabaseWallet {
@@ -135,6 +137,8 @@ function localTransactionToSupabase(tx: DbTransaction): SupabaseTransaction {
     description: tx.name,
     notes: tx.notes ?? null,
     transaction_date: tx.date,
+    created_at: tx.createdAt,
+    updated_at: tx.updatedAt,
   };
 }
 
@@ -179,6 +183,47 @@ function formatGroupDate(iso: string): string {
     weekday: "long", month: "long", day: "numeric",
     ...(sameYear ? {} : { year: "numeric" }),
   });
+}
+
+function formatDetailDate(value: string): string {
+  const dateValue = value.includes("T") ? value : `${value}T00:00:00`;
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function formatDetailTime(value: string): string {
+  if (!value.includes("T")) return "No time recorded";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "No time recorded";
+  return date.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function formatTimestamp(value?: string): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function formatTypeLabel(type: DisplayTx["type"]): string {
+  if (type === "income") return "Income";
+  if (type === "expense") return "Expense";
+  return "Transfer";
 }
 
 function groupByDate(txs: DisplayTx[]): [string, DisplayTx[]][] {
@@ -424,6 +469,7 @@ function AddTransactionModal({
         amount: amt,
         transaction_type: txType,
         description: name.trim(),
+        notes: notes.trim() || null,
         transaction_date: date,
       });
 
@@ -625,6 +671,7 @@ function EditTransactionModal({
   const [catId, setCatId] = useState("");
   const [walletId, setWalletId] = useState("");
   const [date, setDate] = useState("");
+  const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -636,6 +683,7 @@ function EditTransactionModal({
     setCatId(tx.category_id ?? "");
     setWalletId(tx.wallet_id);
     setDate(tx.transaction_date);
+    setNotes(tx.notes ?? "");
     setError("");
   }, [tx]);
 
@@ -686,6 +734,7 @@ function EditTransactionModal({
           amount: parsed,
           date,
           name: name.trim(),
+          notes: notes.trim() || undefined,
         });
         onSaved();
         onClose();
@@ -702,6 +751,7 @@ function EditTransactionModal({
         amount: parsed,
         transaction_type: txType,
         description: name.trim(),
+        notes: notes.trim() || null,
         transaction_date: date,
       };
 
@@ -712,7 +762,7 @@ function EditTransactionModal({
           .update(payload)
           .eq("id", tx.id)
           .eq("user_id", userId)
-          .select("id,user_id,wallet_id,destination_wallet_id,debt_id,debt_type,person_name,category_id,amount,transaction_type,description,notes,transaction_date,created_at,is_deleted")
+          .select("id,user_id,wallet_id,destination_wallet_id,debt_id,debt_type,person_name,category_id,amount,transaction_type,description,notes,transaction_date,created_at,updated_at,is_deleted")
       );
 
       if (updateError) { setError(updateError.message); return; }
@@ -777,6 +827,17 @@ function EditTransactionModal({
             <Input value={name} onChange={(e) => setName(e.target.value)} className="bg-zinc-800 border-zinc-700 h-9" />
           </div>
 
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium text-zinc-400">Notes</label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={3}
+              className="min-h-20 resize-none rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none transition-colors placeholder:text-zinc-500 focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/30"
+              placeholder="No notes added"
+            />
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-medium text-zinc-400">Category</label>
@@ -828,12 +889,133 @@ function SummaryCard({
 
 // ─── TransactionRow ───────────────────────────────────────────────────────────
 
+function DetailItem({
+  label,
+  value,
+  className,
+}: {
+  label: string;
+  value: string;
+  className?: string;
+}) {
+  return (
+    <div className={cn("min-w-0 rounded-xl bg-zinc-800/60 px-3 py-2.5", className)}>
+      <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">{label}</p>
+      <p className="mt-1 break-words text-sm font-medium text-zinc-100">{value}</p>
+    </div>
+  );
+}
+
+function TransactionDetailsModal({
+  tx,
+  raw,
+  destinationWalletName,
+  onClose,
+  onEdit,
+  onDelete,
+}: {
+  tx: DisplayTx | null;
+  raw: SupabaseTransaction | null;
+  destinationWalletName?: string;
+  onClose: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const { formatCurrency } = useCurrency();
+  if (!tx || !raw) return null;
+
+  const isIncome = tx.type === "income";
+  const isExpense = tx.type === "expense";
+  const createdAt = formatTimestamp(raw.created_at);
+  const updatedAt = formatTimestamp(raw.updated_at);
+  const notes = (raw.notes ?? tx.notes ?? "").trim();
+  const walletLabel = tx.type === "transfer" && destinationWalletName
+    ? `${tx.walletName} to ${destinationWalletName}`
+    : tx.walletName;
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-end justify-center p-0 sm:items-center sm:p-4">
+      <div className="absolute inset-0 theme-overlay backdrop-blur-sm" onClick={onClose} />
+      <div className="dezu-modal-panel relative w-full bg-zinc-900 shadow-2xl ring-1 ring-white/10 sm:max-w-lg sm:rounded-2xl">
+        <div className="dezu-modal-header flex items-start justify-between gap-4 border-b border-zinc-800 px-5 py-4">
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-zinc-500">Transaction Details</p>
+            <h2 className="mt-1 truncate text-lg font-semibold text-zinc-50">{tx.name}</h2>
+          </div>
+          <button onClick={onClose} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-[var(--theme-primary-soft)] hover:text-[var(--theme-primary)]">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="dezu-modal-body max-h-[70dvh] overflow-y-auto px-5 py-5">
+          <div className="mb-4 flex items-center justify-between gap-3 rounded-xl bg-zinc-800/60 px-3 py-3">
+            <div>
+              <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">Amount</p>
+              <p className={cn("mt-1 text-xl font-bold tabular-nums", isIncome ? "text-emerald-400" : tx.type === "transfer" ? "text-sky-400" : "text-zinc-50")}>
+                {tx.type === "transfer" ? "" : isIncome ? "+" : "-"}{formatCurrency(tx.amount)}
+              </p>
+            </div>
+            <span className={cn(
+              "rounded-lg px-2.5 py-1 text-xs font-semibold",
+              isIncome ? "bg-emerald-500/10 text-emerald-300" : isExpense ? "bg-rose-500/10 text-rose-300" : "bg-sky-500/10 text-sky-300"
+            )}>
+              {formatTypeLabel(tx.type)}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <DetailItem label="Wallet" value={walletLabel} />
+            <DetailItem label="Category" value={tx.categoryName} />
+            <DetailItem label="Date" value={formatDetailDate(raw.transaction_date)} />
+            <DetailItem label="Time" value={formatDetailTime(raw.transaction_date)} />
+            {createdAt && <DetailItem label="Created at" value={createdAt} />}
+            {updatedAt && <DetailItem label="Updated at" value={updatedAt} />}
+          </div>
+
+          <div className="mt-2 rounded-xl bg-zinc-800/60 px-3 py-3">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">Notes</p>
+            <p className={cn("mt-1 whitespace-pre-wrap break-words text-sm", notes ? "text-zinc-100" : "text-zinc-500")}>
+              {notes || "No notes added"}
+            </p>
+          </div>
+        </div>
+
+        <div className="dezu-modal-footer flex flex-col gap-2 border-t border-zinc-800 px-5 py-4 sm:flex-row sm:items-center sm:justify-end">
+          <button
+            onClick={onEdit}
+            disabled={tx.type === "transfer"}
+            className="flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium text-zinc-300 transition-colors hover:bg-[var(--theme-primary-soft)] hover:text-[var(--theme-primary)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-zinc-300"
+          >
+            <Pencil size={14} />
+            Edit Transaction
+          </button>
+          <button
+            onClick={onDelete}
+            className="flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold text-rose-400 transition-colors hover:bg-rose-500/10"
+          >
+            <Trash2 size={14} />
+            Delete Transaction
+          </button>
+          <button
+            onClick={onClose}
+            className="rounded-lg px-4 py-2 text-sm font-medium text-zinc-400 transition-colors hover:bg-[var(--theme-primary-soft)] hover:text-[var(--theme-primary)]"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TransactionRow({
   tx,
+  onOpen,
   onEdit,
   onDelete,
 }: {
   tx: DisplayTx;
+  onOpen: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }) {
@@ -855,7 +1037,18 @@ function TransactionRow({
   }, [menuOpen]);
 
   return (
-    <div className="dezu-card group flex cursor-pointer items-center gap-3 rounded-[1.15rem] bg-card/90 px-3 py-3 transition-colors">
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpen();
+        }
+      }}
+      className="dezu-card group flex cursor-pointer items-center gap-3 rounded-[1.15rem] bg-card/90 px-3 py-3 transition-colors hover:bg-card"
+    >
       <div className={`w-9 h-9 rounded-xl ${colors.bg} flex items-center justify-center shrink-0`}>
         <Icon size={15} className={colors.text} strokeWidth={1.75} />
       </div>
@@ -874,9 +1067,10 @@ function TransactionRow({
       <p className={`text-sm font-semibold tabular-nums shrink-0 ${isIncome ? "text-emerald-400" : isTransfer ? "text-sky-400" : "text-zinc-100"}`}>
         {isTransfer ? "" : isIncome ? "+" : "-"}{formatCurrency(tx.amount)}
       </p>
-      <div className="relative shrink-0" ref={menuRef}>
+      <div className="relative shrink-0" ref={menuRef} onClick={(event) => event.stopPropagation()}>
         <button
           onClick={() => setMenuOpen((open) => !open)}
+          aria-label="Transaction actions"
           className="w-8 h-8 rounded-lg flex items-center justify-center text-zinc-500 hover:text-[var(--theme-primary)] hover:bg-[var(--theme-primary-soft)] transition-colors sm:opacity-0 sm:group-hover:opacity-100"
         >
           <MoreHorizontal size={15} />
@@ -923,6 +1117,7 @@ export function TransactionsView() {
   const [catFilter,  setCatFilter]  = useState("all");
   const [walFilter,  setWalFilter]  = useState("all");
   const [filterOpen, setFilterOpen] = useState(false);
+  const [detailsId, setDetailsId] = useState<string | null>(null);
   const [editTarget, setEditTarget] = useState<SupabaseTransaction | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SupabaseTransaction | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -968,7 +1163,7 @@ export function TransactionsView() {
           "transactions",
           supabase
             .from("transactions")
-            .select("id,wallet_id,destination_wallet_id,debt_id,debt_type,person_name,category_id,amount,transaction_type,description,notes,transaction_date")
+            .select("id,wallet_id,destination_wallet_id,debt_id,debt_type,person_name,category_id,amount,transaction_type,description,notes,transaction_date,created_at,updated_at")
             .eq("user_id", user.id)
             .eq("is_deleted", false)
             .order("transaction_date", { ascending: false })
@@ -1022,6 +1217,17 @@ export function TransactionsView() {
 
   // resolved display transactions
   const allResolved = useMemo(() => resolve(rawTxs, catMap, walMap), [rawTxs, catMap, walMap]);
+  const detailsTx = useMemo(
+    () => detailsId ? allResolved.find((tx) => tx.id === detailsId) ?? null : null,
+    [allResolved, detailsId]
+  );
+  const detailsRaw = useMemo(
+    () => detailsId ? rawTxs.find((tx) => tx.id === detailsId) ?? null : null,
+    [detailsId, rawTxs]
+  );
+  const detailsDestinationWalletName = detailsRaw?.destination_wallet_id
+    ? walMap.get(detailsRaw.destination_wallet_id)?.name
+    : undefined;
 
   // filter options (unique category/wallet names)
   const catOptions = useMemo(
@@ -1301,6 +1507,7 @@ export function TransactionsView() {
                             <TransactionRow
                               key={tx.id}
                               tx={tx}
+                              onOpen={() => setDetailsId(tx.id)}
                               onEdit={() => raw && setEditTarget(raw)}
                               onDelete={() => raw && setDeleteTarget(raw)}
                             />
@@ -1344,6 +1551,22 @@ export function TransactionsView() {
           setCatFilter(category);
           setWalFilter(wallet);
           setFilterOpen(false);
+        }}
+      />
+      <TransactionDetailsModal
+        tx={detailsTx}
+        raw={detailsRaw}
+        destinationWalletName={detailsDestinationWalletName}
+        onClose={() => setDetailsId(null)}
+        onEdit={() => {
+          if (!detailsRaw || detailsRaw.transaction_type === "transfer") return;
+          setDetailsId(null);
+          setEditTarget(detailsRaw);
+        }}
+        onDelete={() => {
+          if (!detailsRaw) return;
+          setDetailsId(null);
+          setDeleteTarget(detailsRaw);
         }}
       />
       <EditTransactionModal

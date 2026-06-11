@@ -1,7 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Line,
+  LineChart,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import {
   AlertTriangle,
   ArrowDownLeft,
@@ -29,6 +39,14 @@ import { RecentTransactions, type DashboardRecentTx } from "./recent-transaction
 import type { DashboardTopCategory } from "./top-categories";
 
 type SpendingPeriod = "week" | "month" | "year";
+type FinancialChartType = "bar" | "line";
+type FinancialPoint = { label: string; income: number; expenses: number; netCashFlow: number };
+
+const FINANCIAL_SERIES_COLORS = {
+  income: "rgb(52 211 153)",
+  expenses: "rgb(251 113 133)",
+  netCashFlow: "rgb(56 189 248)",
+};
 
 function todayMonth(): string {
   const d = new Date();
@@ -53,6 +71,7 @@ const EMPTY: {
   netSavings: number; savingsRate: number;
   incomeTrend: number; expensesTrend: number; savingsTrend: number;
   chartData: Array<{ month: string; income: number; expenses: number }>;
+  financialOverview: Record<SpendingPeriod, FinancialPoint[]>;
   topCategories: DashboardTopCategory[];
   spendingCategories: Record<SpendingPeriod, DashboardTopCategory[]>;
   recentTransactions: DashboardRecentTx[];
@@ -65,7 +84,7 @@ const EMPTY: {
   netWorth: 0, monthIncome: 0, monthExpenses: 0,
   netSavings: 0, savingsRate: 0,
   incomeTrend: 0, expensesTrend: 0, savingsTrend: 0,
-  chartData: [], topCategories: [], spendingCategories: { week: [], month: [], year: [] }, recentTransactions: [], wallets: [],
+  chartData: [], financialOverview: { week: [], month: [], year: [] }, topCategories: [], spendingCategories: { week: [], month: [], year: [] }, recentTransactions: [], wallets: [],
   goals: [],
   bills: [],
   billSummary: {
@@ -250,6 +269,50 @@ function amount(tx: SupabaseTransaction) {
 
 function sumByType(txs: SupabaseTransaction[], type: "income" | "expense") {
   return txs.filter((tx) => tx.transaction_type === type).reduce((sum, tx) => sum + amount(tx), 0);
+}
+
+function summarizeFinancialPoint(label: string, txs: SupabaseTransaction[]): FinancialPoint {
+  const income = sumByType(txs, "income");
+  const expenses = sumByType(txs, "expense");
+  return { label, income, expenses, netCashFlow: income - expenses };
+}
+
+function buildFinancialOverview(transactions: SupabaseTransaction[], month: string): Record<SpendingPeriod, FinancialPoint[]> {
+  const week = weekRange();
+  const year = yearRange(month);
+  const weekStart = new Date(week.start + "T00:00:00");
+  const [, monthNumber] = month.split("-").map(Number);
+  const daysInMonth = new Date(Number(month.slice(0, 4)), monthNumber, 0).getDate();
+
+  return {
+    week: Array.from({ length: 7 }, (_, index) => {
+      const date = new Date(weekStart);
+      date.setDate(weekStart.getDate() + index);
+      const iso = toIsoDate(date);
+      return summarizeFinancialPoint(
+        date.toLocaleDateString("en-US", { weekday: "short" }),
+        transactions.filter((tx) => tx.transaction_date === iso)
+      );
+    }),
+    month: Array.from({ length: Math.ceil(daysInMonth / 7) }, (_, index) => {
+      const startDay = index * 7 + 1;
+      const endDay = Math.min(startDay + 6, daysInMonth);
+      const start = `${month}-${String(startDay).padStart(2, "0")}`;
+      const end = `${month}-${String(endDay).padStart(2, "0")}`;
+      return summarizeFinancialPoint(
+        `W${index + 1}`,
+        transactions.filter((tx) => tx.transaction_date >= start && tx.transaction_date <= end)
+      );
+    }),
+    year: Array.from({ length: 12 }, (_, index) => {
+      const itemMonth = `${year.start.slice(0, 4)}-${String(index + 1).padStart(2, "0")}`;
+      const range = monthRange(itemMonth);
+      return summarizeFinancialPoint(
+        shortMonthLabel(itemMonth),
+        transactions.filter((tx) => tx.transaction_date >= range.start && tx.transaction_date <= range.end)
+      );
+    }),
+  };
 }
 
 function todayIso() {
@@ -819,72 +882,209 @@ function FinancialHealthCards({
   );
 }
 
-function SpendingOverviewWidget({
+function ChartFallback({ children, loading = false }: { children?: ReactNode; loading?: boolean }) {
+  return (
+    <div className="flex h-full items-center justify-center rounded-xl bg-muted/25">
+      {loading ? (
+        <div className="flex w-full flex-col gap-3 px-5">
+          <div className="h-3 w-24 animate-pulse rounded-full bg-muted" />
+          <div className="h-28 animate-pulse rounded-xl bg-muted/70 sm:h-40" />
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">{children}</p>
+      )}
+    </div>
+  );
+}
+
+function useChartSize() {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [size, setSize] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+
+    let frame = 0;
+    const update = () => {
+      const rect = node.getBoundingClientRect();
+      const next = { width: Math.floor(rect.width), height: Math.floor(rect.height) };
+      setSize((current) => current.width === next.width && current.height === next.height ? current : next);
+    };
+
+    frame = window.requestAnimationFrame(update);
+    const observer = new ResizeObserver(() => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(update);
+    });
+    observer.observe(node);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, []);
+
+  return { ref, size };
+}
+
+function FinancialTooltip({
+  active,
+  payload,
+  label,
+}: {
+  active?: boolean;
+  payload?: Array<{ name: string; value: number; color: string }>;
+  label?: string;
+}) {
+  const { formatCurrency } = useCurrency();
+  if (!active || !payload?.length) return null;
+
+  return (
+    <div className="rounded-xl border border-border bg-popover px-4 py-3 text-xs text-popover-foreground shadow-2xl">
+      <p className="mb-2 font-medium text-muted-foreground">{label}</p>
+      {payload.map((entry) => (
+        <div key={entry.name} className="mb-1 flex items-center gap-2 last:mb-0">
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: entry.color }} />
+          <span className="text-muted-foreground">{entry.name}</span>
+          <span className="ml-auto pl-3 font-semibold text-foreground">
+            {formatCurrency(entry.value, { decimals: 0 })}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function FinancialOverviewWidget({
   period,
   onPeriodChange,
-  categories,
+  chartType,
+  onChartTypeChange,
+  data,
 }: {
   period: SpendingPeriod;
   onPeriodChange: (period: SpendingPeriod) => void;
-  categories: DashboardTopCategory[];
+  chartType: FinancialChartType;
+  onChartTypeChange: (type: FinancialChartType) => void;
+  data: FinancialPoint[];
 }) {
   const { formatCurrency } = useCurrency();
+  const { ref, size } = useChartSize();
+  const hasData = data.length > 0 && data.some((item) => item.income > 0 || item.expenses > 0);
+  const canRenderChart = hasData && size.width > 0 && size.height > 0;
+  const totals = data.reduce(
+    (sum, item) => ({
+      income: sum.income + item.income,
+      expenses: sum.expenses + item.expenses,
+      netCashFlow: sum.netCashFlow + item.netCashFlow,
+    }),
+    { income: 0, expenses: 0, netCashFlow: 0 }
+  );
   const periodOptions: Array<{ key: SpendingPeriod; label: string }> = [
     { key: "week", label: "This Week" },
     { key: "month", label: "This Month" },
     { key: "year", label: "This Year" },
   ];
+  const chartOptions: Array<{ key: FinancialChartType; label: string }> = [
+    { key: "bar", label: "Bar Chart" },
+    { key: "line", label: "Line Chart" },
+  ];
 
   return (
     <div className="dezu-card rounded-[1.15rem] bg-card/90 p-3 text-card-foreground sm:p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <h2 className="font-heading text-base font-medium leading-snug">Spending Overview</h2>
-          <p className="text-sm text-muted-foreground">Expenses grouped by category</p>
+          <h2 className="font-heading text-base font-medium leading-snug">Financial Overview</h2>
+          <p className="text-sm text-muted-foreground">Income, expenses, and net cash flow</p>
         </div>
-        <div className="theme-pill-list grid grid-cols-3 gap-1 rounded-lg p-1">
-          {periodOptions.map((option) => (
-            <button
-              key={option.key}
-              type="button"
-              onClick={() => onPeriodChange(option.key)}
-              className={cn(
-                "rounded-md px-2 py-1.5 text-[11px] font-semibold transition-colors sm:text-xs",
-                period === option.key ? "theme-selected" : "theme-pill"
-              )}
-            >
-              {option.label}
-            </button>
-          ))}
+        <div className="grid gap-2 sm:grid-cols-2 lg:min-w-[360px]">
+          <div className="theme-pill-list grid grid-cols-3 gap-1 rounded-lg p-1">
+            {periodOptions.map((option) => (
+              <button
+                key={option.key}
+                type="button"
+                onClick={() => onPeriodChange(option.key)}
+                className={cn(
+                  "rounded-md px-2 py-1.5 text-[11px] font-semibold transition-colors sm:text-xs",
+                  period === option.key ? "theme-selected" : "theme-pill"
+                )}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <div className="theme-pill-list grid grid-cols-2 gap-1 rounded-lg p-1">
+            {chartOptions.map((option) => (
+              <button
+                key={option.key}
+                type="button"
+                onClick={() => onChartTypeChange(option.key)}
+                className={cn(
+                  "rounded-md px-2 py-1.5 text-[11px] font-semibold transition-colors sm:text-xs",
+                  chartType === option.key ? "theme-selected" : "theme-pill"
+                )}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      <div className="mt-4 flex flex-col gap-3">
-        {categories.length === 0 ? (
-          <div className="rounded-xl bg-muted/50 py-8 text-center text-sm text-muted-foreground">
-            No expenses for this period.
-          </div>
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        <MiniMetric label="Income" value={formatCurrency(totals.income, { decimals: 0 })} tone="emerald" />
+        <MiniMetric label="Expenses" value={formatCurrency(totals.expenses, { decimals: 0 })} tone="rose" />
+        <MiniMetric
+          label="Net Cash Flow"
+          value={`${totals.netCashFlow >= 0 ? "+" : "-"}${formatCurrency(Math.abs(totals.netCashFlow), { decimals: 0 })}`}
+          tone={totals.netCashFlow >= 0 ? "sky" : "amber"}
+        />
+      </div>
+
+      <div ref={ref} className="mt-4 h-48 min-h-48 w-full sm:h-60 sm:min-h-60">
+        {!hasData ? (
+          <ChartFallback>No transaction activity for this period.</ChartFallback>
+        ) : !canRenderChart ? (
+          <ChartFallback loading />
+        ) : chartType === "bar" ? (
+          <BarChart width={size.width} height={size.height} data={data} margin={{ top: 8, right: 4, left: -18, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+            <XAxis dataKey="label" tick={{ fill: "var(--muted-foreground)", fontSize: 11 }} axisLine={false} tickLine={false} dy={6} />
+            <YAxis tick={{ fill: "var(--muted-foreground)", fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(value) => `${formatCurrency(Number(value) / 1000, { decimals: 0 })}k`} />
+            <Tooltip content={<FinancialTooltip />} cursor={{ fill: "var(--muted)" }} />
+            <Bar dataKey="income" name="Income" fill={FINANCIAL_SERIES_COLORS.income} radius={[5, 5, 0, 0]} />
+            <Bar dataKey="expenses" name="Expenses" fill={FINANCIAL_SERIES_COLORS.expenses} radius={[5, 5, 0, 0]} />
+            <Bar dataKey="netCashFlow" name="Net Cash Flow" fill={FINANCIAL_SERIES_COLORS.netCashFlow} radius={[5, 5, 0, 0]} />
+          </BarChart>
         ) : (
-          categories.map((category) => (
-            <Link
-              key={category.categoryId}
-              href={`/transactions?category=${encodeURIComponent(category.name)}`}
-              className="group rounded-xl p-2 transition-colors hover:bg-muted/40"
-            >
-              <div className="mb-1.5 flex items-center justify-between gap-3">
-                <span className="truncate text-sm font-medium text-card-foreground group-hover:text-primary">{category.name}</span>
-                <div className="shrink-0 text-right">
-                  <span className="text-sm font-semibold tabular-nums text-card-foreground">{formatCurrency(category.total, { decimals: 0 })}</span>
-                  <span className="ml-2 text-xs tabular-nums text-muted-foreground">{category.percentage.toFixed(1)}%</span>
-                </div>
-              </div>
-              <div className="h-2 overflow-hidden rounded-full bg-muted">
-                <div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${Math.min(category.percentage, 100)}%` }} />
-              </div>
-            </Link>
-          ))
+          <LineChart width={size.width} height={size.height} data={data} margin={{ top: 8, right: 4, left: -18, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+            <XAxis dataKey="label" tick={{ fill: "var(--muted-foreground)", fontSize: 11 }} axisLine={false} tickLine={false} dy={6} />
+            <YAxis tick={{ fill: "var(--muted-foreground)", fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(value) => `${formatCurrency(Number(value) / 1000, { decimals: 0 })}k`} />
+            <Tooltip content={<FinancialTooltip />} cursor={{ stroke: "var(--ring)", strokeWidth: 1 }} />
+            <Line type="monotone" dataKey="income" name="Income" stroke={FINANCIAL_SERIES_COLORS.income} strokeWidth={2} dot={false} activeDot={{ r: 4, fill: FINANCIAL_SERIES_COLORS.income, strokeWidth: 0 }} />
+            <Line type="monotone" dataKey="expenses" name="Expenses" stroke={FINANCIAL_SERIES_COLORS.expenses} strokeWidth={2} dot={false} activeDot={{ r: 4, fill: FINANCIAL_SERIES_COLORS.expenses, strokeWidth: 0 }} />
+            <Line type="monotone" dataKey="netCashFlow" name="Net Cash Flow" stroke={FINANCIAL_SERIES_COLORS.netCashFlow} strokeWidth={2} dot={false} activeDot={{ r: 4, fill: FINANCIAL_SERIES_COLORS.netCashFlow, strokeWidth: 0 }} />
+          </LineChart>
         )}
       </div>
+    </div>
+  );
+}
+
+function MiniMetric({ label, value, tone }: { label: string; value: string; tone: "emerald" | "rose" | "sky" | "amber" }) {
+  const toneClass = {
+    emerald: "text-emerald-400",
+    rose: "text-rose-400",
+    sky: "text-sky-400",
+    amber: "text-amber-400",
+  }[tone];
+
+  return (
+    <div className="rounded-xl bg-muted/40 px-2.5 py-2">
+      <p className="truncate text-[10px] font-medium text-muted-foreground sm:text-xs">{label}</p>
+      <p className={cn("mt-0.5 truncate text-xs font-bold tabular-nums min-[380px]:text-sm sm:text-base", toneClass)}>{value}</p>
     </div>
   );
 }
@@ -1000,7 +1200,8 @@ export function DashboardView() {
   const { user, loading: authLoading, isLoggingOut, isGuest } = useAuth();
   const { currency } = useCurrency();
   const [month, setMonth] = useState(todayMonth);
-  const [spendingPeriod, setSpendingPeriod] = useState<SpendingPeriod>("month");
+  const [financialPeriod, setFinancialPeriod] = useState<SpendingPeriod>("month");
+  const [financialChartType, setFinancialChartType] = useState<FinancialChartType>("bar");
   const [data, setData] = useState<typeof EMPTY | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -1102,6 +1303,7 @@ export function DashboardView() {
           expenses: sumByType(txs, "expense"),
         };
       });
+      const financialOverview = buildFinancialOverview(transactions, month);
 
       const categoryTotals = new Map<string, number>();
       for (const tx of currentTxs.filter((item) => item.transaction_type === "expense")) {
@@ -1172,6 +1374,7 @@ export function DashboardView() {
         expensesTrend: pctChange(monthExpenses, previousExpenses),
         savingsTrend: pctChange(netSavings, previousSavings),
         chartData,
+        financialOverview,
         topCategories,
         spendingCategories: {
           week: summarizeSpendingCategories(transactions, categoryMap, week.start, week.end),
@@ -1203,6 +1406,15 @@ export function DashboardView() {
       mounted = false;
     };
   }, [loadDashboard]);
+
+  useEffect(() => {
+    const saved = window.localStorage.getItem("dezu-financial-chart-type");
+    if (saved === "bar" || saved === "line") setFinancialChartType(saved);
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem("dezu-financial-chart-type", financialChartType);
+  }, [financialChartType]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -1254,6 +1466,7 @@ export function DashboardView() {
             categoryId: String(category.categoryId),
           })),
         },
+        financialOverview: localDashboard.data.financialOverview,
         wallets: localDashboard.data.wallets.map((wallet) => ({
           id: wallet.id,
           name: wallet.name,
@@ -1308,10 +1521,12 @@ export function DashboardView() {
             savingsRate={stats.savingsRate}
           />
 
-          <SpendingOverviewWidget
-            period={spendingPeriod}
-            onPeriodChange={setSpendingPeriod}
-            categories={stats.spendingCategories[spendingPeriod]}
+          <FinancialOverviewWidget
+            period={financialPeriod}
+            onPeriodChange={setFinancialPeriod}
+            chartType={financialChartType}
+            onChartTypeChange={setFinancialChartType}
+            data={stats.financialOverview[financialPeriod]}
           />
 
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 lg:gap-5">

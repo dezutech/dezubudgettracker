@@ -204,6 +204,9 @@ export interface Database {
           wallet_id: string | null;
           target_date: string | null;
           status: GoalStatus;
+          icon: string | null;
+          color: string | null;
+          notes: string | null;
         };
         Insert: CommonInsert & {
           name: string;
@@ -212,6 +215,9 @@ export interface Database {
           wallet_id?: string | null;
           target_date?: string | null;
           status?: GoalStatus;
+          icon?: string | null;
+          color?: string | null;
+          notes?: string | null;
         };
         Update: CommonUpdate & {
           name?: string;
@@ -220,6 +226,9 @@ export interface Database {
           wallet_id?: string | null;
           target_date?: string | null;
           status?: GoalStatus;
+          icon?: string | null;
+          color?: string | null;
+          notes?: string | null;
         };
       };
       notifications: {
