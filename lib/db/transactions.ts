@@ -22,6 +22,12 @@ function generateSyncId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+function createdDesc(a: DbTransaction, b: DbTransaction): number {
+  const createdDiff = Date.parse(b.createdAt) - Date.parse(a.createdAt);
+  if (Number.isFinite(createdDiff) && createdDiff !== 0) return createdDiff;
+  return b.id - a.id;
+}
+
 /** Balance delta for a transaction: positive = wallet gains, negative = wallet loses. */
 function balanceDelta(type: DbTransaction["type"], amount: number): number {
   if (type === "income") return amount;
@@ -55,7 +61,7 @@ export async function getTransactions(
   query: TransactionQuery = {}
 ): Promise<DbTransaction[]> {
   const userId = query.userId ?? OFFLINE_USER_ID;
-  let results = await db.transactions.orderBy("date").reverse().toArray();
+  let results = await db.transactions.toArray();
   results = results.filter((t) => t.userId === userId);
 
   if (query.walletId !== undefined)
@@ -72,6 +78,8 @@ export async function getTransactions(
 
   if (query.endDate !== undefined)
     results = results.filter((t) => t.date <= query.endDate!);
+
+  results = results.sort(createdDesc);
 
   const offset = query.offset ?? 0;
   if (query.limit !== undefined)
@@ -93,11 +101,11 @@ export async function getTransactionById(
 export async function getTransactionsByWallet(
   walletId: number
 ): Promise<DbTransaction[]> {
-  return db.transactions
+  const results = await db.transactions
     .where("[walletId+date]")
     .between([walletId, ""], [walletId, "9999-99-99"], true, true)
-    .reverse()
     .toArray();
+  return results.sort(createdDesc);
 }
 
 /** Sum income and expenses for a date range. */

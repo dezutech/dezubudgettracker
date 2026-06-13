@@ -72,6 +72,7 @@ type DisplayTx = {
   amount: number;
   type: "income" | "expense" | "transfer";
   date: string;
+  createdAt?: string;
   notes?: string;
   categoryName: string;
   categoryIcon: string;
@@ -160,6 +161,7 @@ function resolve(
       amount:        Number(tx.amount),
       type:          tx.transaction_type,
       date:          tx.transaction_date,
+      createdAt:     tx.created_at,
       notes:         tx.notes ?? (isTransfer ? tx.description ?? undefined : undefined),
       categoryName:  isTransfer ? "Transfer" : cat?.name  ?? "Unknown",
       categoryIcon:  isTransfer ? "ArrowLeftRight" : cat?.icon  ?? "HelpCircle",
@@ -226,13 +228,39 @@ function formatTypeLabel(type: DisplayTx["type"]): string {
   return "Transfer";
 }
 
+function createdTimeValue(tx: { createdAt?: string; date: string; id: string }): number {
+  const parsed = tx.createdAt ? Date.parse(tx.createdAt) : NaN;
+  if (Number.isFinite(parsed)) return parsed;
+  return Date.parse(`${tx.date}T00:00:00`) || Number(tx.id) || 0;
+}
+
+function sortByCreatedDesc<T extends { createdAt?: string; date: string; id: string }>(txs: T[]): T[] {
+  return [...txs].sort((a, b) => {
+    const createdDiff = createdTimeValue(b) - createdTimeValue(a);
+    if (createdDiff !== 0) return createdDiff;
+    return b.id.localeCompare(a.id, undefined, { numeric: true });
+  });
+}
+
+function formatCreatedTime(value?: string): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 function groupByDate(txs: DisplayTx[]): [string, DisplayTx[]][] {
   const map = new Map<string, DisplayTx[]>();
   for (const tx of txs) {
     if (!map.has(tx.date)) map.set(tx.date, []);
     map.get(tx.date)!.push(tx);
   }
-  return Array.from(map.entries());
+  return Array.from(map.entries())
+    .sort(([a], [b]) => b.localeCompare(a))
+    .map(([date, items]) => [date, sortByCreatedDesc(items)]);
 }
 
 function dayNet(txs: DisplayTx[]): number {
@@ -1026,6 +1054,7 @@ function TransactionRow({
   const colors = COLOR_MAP[tx.categoryColor] ?? DEFAULT_COLOR;
   const isIncome = tx.type === "income";
   const isTransfer = tx.type === "transfer";
+  const createdTime = formatCreatedTime(tx.createdAt);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -1061,6 +1090,12 @@ function TransactionRow({
           {tx.walletName}
           <span className="mx-1 text-zinc-700">·</span>
           {tx.categoryName}
+          {createdTime && (
+            <>
+              <span className="mx-1 text-zinc-700">·</span>
+              {createdTime}
+            </>
+          )}
           {tx.notes && <span className="ml-1 text-zinc-600 italic">"{tx.notes}"</span>}
         </p>
       </div>
@@ -1166,7 +1201,7 @@ export function TransactionsView() {
             .select("id,wallet_id,destination_wallet_id,debt_id,debt_type,person_name,category_id,amount,transaction_type,description,notes,transaction_date,created_at,updated_at")
             .eq("user_id", user.id)
             .eq("is_deleted", false)
-            .order("transaction_date", { ascending: false })
+            .order("created_at", { ascending: false })
         ),
         loggedSupabase(
           "wallets",

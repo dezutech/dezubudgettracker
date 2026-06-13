@@ -135,6 +135,7 @@ type SupabaseTransaction = {
   transaction_type: "income" | "expense" | "transfer";
   description: string | null;
   transaction_date: string;
+  created_at?: string;
 };
 
 type SupabaseBudget = {
@@ -1239,7 +1240,7 @@ export function DashboardView() {
       const supabase = createClient();
       const [walletSettled, txSettled, categorySettled, budgetSettled, goalSettled, billSettled, debtSettled] = await Promise.allSettled([
         loggedSupabase("wallets", supabase.from("wallets").select("id,name,type,balance,credit_limit,color,logo_url").eq("user_id", user.id).eq("is_deleted", false)),
-        loggedSupabase("transactions", supabase.from("transactions").select("id,wallet_id,destination_wallet_id,category_id,amount,transaction_type,description,transaction_date").eq("user_id", user.id).eq("is_deleted", false)),
+        loggedSupabase("transactions", supabase.from("transactions").select("id,wallet_id,destination_wallet_id,category_id,amount,transaction_type,description,transaction_date,created_at").eq("user_id", user.id).eq("is_deleted", false).order("created_at", { ascending: false })),
         loggedSupabase("categories", supabase.from("categories").select("id,name,type,icon,color").eq("user_id", user.id).eq("is_deleted", false)),
         loggedSupabase("budgets", supabase.from("budgets").select("id,category_id,amount,month").eq("user_id", user.id).eq("is_deleted", false)),
         loggedSupabase("goals", supabase.from("goals").select("id,name,target_amount,current_amount,target_date,status").eq("user_id", user.id).eq("is_deleted", false)),
@@ -1350,7 +1351,11 @@ export function DashboardView() {
         }));
 
       const recentTransactions: DashboardRecentTx[] = [...transactions]
-        .sort((a, b) => b.transaction_date.localeCompare(a.transaction_date))
+        .sort((a, b) => {
+          const createdDiff = Date.parse(b.created_at ?? "") - Date.parse(a.created_at ?? "");
+          if (Number.isFinite(createdDiff) && createdDiff !== 0) return createdDiff;
+          return b.id.localeCompare(a.id, undefined, { numeric: true });
+        })
         .slice(0, 8)
         .map((tx) => {
           const category = tx.category_id ? categoryMap.get(tx.category_id) : undefined;
@@ -1369,6 +1374,7 @@ export function DashboardView() {
             amount: amount(tx),
             type: tx.transaction_type,
             date: tx.transaction_date,
+            createdAt: tx.created_at ?? tx.transaction_date,
           };
         });
 

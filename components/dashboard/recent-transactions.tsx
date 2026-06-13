@@ -25,6 +25,7 @@ export type DashboardRecentTx = {
   amount: number;
   type: "income" | "expense" | "transfer";
   date: string;
+  createdAt?: string;
 };
 
 const ICON_MAP = new Map<string, LucideIcon>([
@@ -66,6 +67,16 @@ function shortDate(iso: string) {
   });
 }
 
+function shortTime(value?: string) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 type RecentTransactionsProps = {
   transactions: DashboardRecentTx[];
 };
@@ -102,6 +113,7 @@ export function RecentTransactions({ transactions }: RecentTransactionsProps) {
               ? "text-sky-400"
               : "text-card-foreground";
             const amountPrefix = isTransfer ? "" : isIncome ? "+" : "-";
+            const createdTime = shortTime(tx.createdAt);
 
             return (
               <div
@@ -124,7 +136,7 @@ export function RecentTransactions({ transactions }: RecentTransactionsProps) {
                     {amountPrefix}{formatCurrency(tx.amount, { decimals: 0 })}
                   </p>
                   <p className="text-[11px] text-muted-foreground mt-0.5">
-                    {shortDate(tx.date)}
+                    {shortDate(tx.date)}{createdTime ? `, ${createdTime}` : ""}
                   </p>
                 </div>
               </div>

@@ -19,6 +19,12 @@ import type {
 
 // ─── useWallets ───────────────────────────────────────────────────────────────
 
+function transactionCreatedDesc(a: DbTransaction, b: DbTransaction): number {
+  const createdDiff = Date.parse(b.createdAt) - Date.parse(a.createdAt);
+  if (Number.isFinite(createdDiff) && createdDiff !== 0) return createdDiff;
+  return b.id - a.id;
+}
+
 export function useWallets(userId = OFFLINE_USER_ID) {
   const [wallets, setWallets] = useState<DbWallet[]>([]);
   const [loading, setLoading] = useState(true);
@@ -58,8 +64,8 @@ export function useTransactions(userId = OFFLINE_USER_ID) {
   useEffect(() => {
     let active = true;
     const sub = liveQuery(() =>
-      db.transactions.orderBy("date").reverse().toArray()
-        .then((transactions) => transactions.filter((transaction) => transaction.userId === userId))
+      db.transactions.toArray()
+        .then((transactions) => transactions.filter((transaction) => transaction.userId === userId).sort(transactionCreatedDesc))
     ).subscribe({
       next: (txs) => {
         if (!active) return;
@@ -197,6 +203,7 @@ export type DashboardRecentTx = {
   amount: number;
   type: TransactionType;
   date: string;
+  createdAt: string;
 };
 
 export type DashboardTopCategory = {
@@ -533,7 +540,7 @@ export function useDashboardData(month: string, userId = OFFLINE_USER_ID) {
 
       // Recent 8 transactions (across all time, sorted newest first)
       const recentTransactions: DashboardRecentTx[] = [...scopedTxs]
-        .sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id)
+        .sort(transactionCreatedDesc)
         .slice(0, 8)
         .map((tx) => {
           const cat    = catMap.get(tx.categoryId);
@@ -548,6 +555,7 @@ export function useDashboardData(month: string, userId = OFFLINE_USER_ID) {
             amount:        tx.amount,
             type:          tx.type,
             date:          tx.date,
+            createdAt:     tx.createdAt,
           };
         });
 
