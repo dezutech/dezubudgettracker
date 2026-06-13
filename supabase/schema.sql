@@ -173,6 +173,11 @@ create table if not exists public.recurring_transactions (
   frequency text not null,
   next_run_date date not null,
   is_active boolean not null default true,
+  status text not null default 'active',
+  end_condition text not null default 'forever',
+  end_date date,
+  max_occurrences integer,
+  occurrences_count integer not null default 0,
   local_id text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -181,8 +186,24 @@ create table if not exists public.recurring_transactions (
   constraint recurring_transactions_title_not_blank check (length(btrim(title)) > 0),
   constraint recurring_transactions_amount_positive check (amount > 0),
   constraint recurring_transactions_type_check check (transaction_type in ('income', 'expense')),
-  constraint recurring_transactions_frequency_check check (frequency in ('daily', 'weekly', 'monthly', 'yearly'))
+  constraint recurring_transactions_frequency_check check (frequency in ('daily', 'weekly', 'monthly', 'yearly')),
+  constraint recurring_transactions_status_check check (status in ('active', 'paused', 'completed')),
+  constraint recurring_transactions_end_condition_check check (end_condition in ('forever', 'end_date', 'occurrences')),
+  constraint recurring_transactions_occurrences_count_non_negative check (occurrences_count >= 0),
+  constraint recurring_transactions_max_occurrences_positive check (max_occurrences is null or max_occurrences > 0)
 );
+
+-- For existing Supabase instances: add columns if they don't exist yet.
+alter table public.recurring_transactions
+  add column if not exists status text not null default 'active';
+alter table public.recurring_transactions
+  add column if not exists end_condition text not null default 'forever';
+alter table public.recurring_transactions
+  add column if not exists end_date date;
+alter table public.recurring_transactions
+  add column if not exists max_occurrences integer;
+alter table public.recurring_transactions
+  add column if not exists occurrences_count integer not null default 0;
 
 create table if not exists public.bills (
   id uuid primary key default gen_random_uuid(),
@@ -522,9 +543,16 @@ create index if not exists notifications_user_unread_idx on public.notifications
 create index if not exists notifications_user_created_idx on public.notifications (user_id, created_at desc) where is_deleted = false;
 
 create index if not exists recurring_transactions_user_id_idx on public.recurring_transactions (user_id);
+-- Legacy index kept for backwards compat; new code filters on status instead.
 create index if not exists recurring_transactions_due_idx
   on public.recurring_transactions (user_id, next_run_date)
   where is_active = true and is_deleted = false;
+create index if not exists recurring_transactions_active_due_idx
+  on public.recurring_transactions (user_id, next_run_date)
+  where status = 'active' and is_deleted = false;
+create index if not exists recurring_transactions_status_idx
+  on public.recurring_transactions (user_id, status)
+  where is_deleted = false;
 create unique index if not exists recurring_transactions_user_local_id_uidx
   on public.recurring_transactions (user_id, local_id)
   where local_id is not null and is_deleted = false;

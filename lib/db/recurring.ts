@@ -6,6 +6,7 @@ import type {
   CreateRecurringInput,
   UpdateRecurringInput,
   RecurringFrequency,
+  RecurringStatus,
 } from "./schema";
 
 // ─── Date helpers ─────────────────────────────────────────────────────────────
@@ -33,6 +34,11 @@ function now() {
   return new Date().toISOString();
 }
 
+/** Derive effective status from a record, handling pre-v9 rows that have no status field. */
+function effectiveStatus(r: DbRecurringTransaction): RecurringStatus {
+  return r.status ?? (r.isActive ? "active" : "paused");
+}
+
 // ─── Read ─────────────────────────────────────────────────────────────────────
 
 export async function getRecurringTransactions(userId = OFFLINE_USER_ID): Promise<DbRecurringTransaction[]> {
@@ -58,7 +64,7 @@ export async function getUpcomingRecurring(
   return db.recurringTransactions
     .where("userId")
     .equals(userId)
-    .filter((r) => r.isActive && r.nextRunDate >= today && r.nextRunDate <= futureStr)
+    .filter((r) => effectiveStatus(r) === "active" && r.nextRunDate >= today && r.nextRunDate <= futureStr)
     .toArray();
 }
 
@@ -68,9 +74,14 @@ export async function createRecurring(
   input: CreateRecurringInput
 ): Promise<number> {
   const ts = now();
+  const status: RecurringStatus = input.status ?? "active";
   return db.recurringTransactions.add({
     ...input,
     userId: input.userId ?? OFFLINE_USER_ID,
+    status,
+    isActive: status === "active",
+    endCondition: input.endCondition ?? "forever",
+    occurrencesCount: input.occurrencesCount ?? 0,
     createdAt: ts,
     updatedAt: ts,
   } as DbRecurringTransaction);
@@ -89,7 +100,16 @@ export async function toggleRecurring(
   id: number,
   isActive: boolean
 ): Promise<void> {
-  await db.recurringTransactions.update(id, { isActive, updatedAt: now() });
+  const status: RecurringStatus = isActive ? "active" : "paused";
+  await db.recurringTransactions.update(id, { isActive, status, updatedAt: now() });
+}
+
+export async function setRecurringStatus(
+  id: number,
+  status: RecurringStatus
+): Promise<void> {
+  const isActive = status === "active";
+  await db.recurringTransactions.update(id, { status, isActive, updatedAt: now() });
 }
 
 // ─── Delete ───────────────────────────────────────────────────────────────────
@@ -103,6 +123,8 @@ export async function deleteRecurring(id: number): Promise<void> {
 /**
  * Scan all active recurring transactions whose nextRunDate is today or earlier.
  * For each one, generate the actual transaction(s) and advance nextRunDate.
+ * Respects end conditions (end_date, occurrences) and marks items as completed
+ * when their end condition is reached.
  *
  * Generates up to MAX_PER_ITEM transactions per recurring entry (safety cap for
  * cases where the app was offline for a long time).
@@ -114,16 +136,29 @@ export async function processRecurringTransactions(userId = OFFLINE_USER_ID): Pr
   const MAX_PER_ITEM = 24;
 
   const due = await db.recurringTransactions
-    .filter((r) => r.userId === userId && r.isActive && r.nextRunDate <= today)
+    .filter((r) => r.userId === userId && effectiveStatus(r) === "active" && r.nextRunDate <= today)
     .toArray();
 
   let totalCreated = 0;
 
   for (const r of due) {
+    const endCondition = r.endCondition ?? "forever";
     let runDate = r.nextRunDate;
     let created = 0;
+    let count = r.occurrencesCount ?? 0;
+    let shouldComplete = false;
 
     while (runDate <= today && created < MAX_PER_ITEM) {
+      // Pre-check: will this occurrence violate end conditions?
+      if (endCondition === "end_date" && r.endDate && runDate > r.endDate) {
+        shouldComplete = true;
+        break;
+      }
+      if (endCondition === "occurrences" && r.maxOccurrences != null && count >= r.maxOccurrences) {
+        shouldComplete = true;
+        break;
+      }
+
       try {
         await createTransaction({
           userId:     r.userId ?? userId,
@@ -135,20 +170,38 @@ export async function processRecurringTransactions(userId = OFFLINE_USER_ID): Pr
           name:       r.title,
           notes:      r.notes,
         });
+        count++;
       } catch {
         // If wallet/category doesn't exist, skip this occurrence
         break;
       }
+
       runDate = nextOccurrence(runDate, r.frequency);
       created++;
+
+      // Post-check: did we hit the end condition on this new nextRunDate?
+      if (endCondition === "occurrences" && r.maxOccurrences != null && count >= r.maxOccurrences) {
+        shouldComplete = true;
+        break;
+      }
+      if (endCondition === "end_date" && r.endDate && runDate > r.endDate) {
+        shouldComplete = true;
+        break;
+      }
     }
 
-    // Always advance nextRunDate so we don't re-process on next boot
-    await db.recurringTransactions.update(r.id, {
+    const updates: Partial<DbRecurringTransaction> & { updatedAt: string } = {
       nextRunDate: runDate,
-      updatedAt:   now(),
-    });
+      occurrencesCount: count,
+      updatedAt: now(),
+    };
 
+    if (shouldComplete) {
+      updates.status = "completed";
+      updates.isActive = false;
+    }
+
+    await db.recurringTransactions.update(r.id, updates);
     totalCreated += created;
   }
 

@@ -19,6 +19,8 @@ export type {
   SyncStatus,
   // Enums (continued)
   RecurringFrequency,
+  RecurringStatus,
+  RecurringEndCondition,
   // Entities (continued)
   DbRecurringTransaction,
   // Input helpers
@@ -103,6 +105,7 @@ export {
   createRecurring,
   updateRecurring,
   toggleRecurring,
+  setRecurringStatus,
   deleteRecurring,
   processRecurringTransactions,
   nextOccurrence,

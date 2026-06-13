@@ -81,18 +81,25 @@ export type DbBudget = {
 // ─── RecurringTransaction ─────────────────────────────────────────────────────
 
 export type RecurringFrequency = "daily" | "weekly" | "monthly" | "yearly";
+export type RecurringStatus = "active" | "paused" | "completed";
+export type RecurringEndCondition = "forever" | "end_date" | "occurrences";
 
 export type DbRecurringTransaction = {
   id: number;
   userId: string;
   title: string;
   amount: number;
-  type: TransactionType;    // "income" | "expense" (no transfer for recurring)
+  type: TransactionType;          // "income" | "expense" (no transfer for recurring)
   categoryId: number;
   walletId: number;
   frequency: RecurringFrequency;
-  nextRunDate: string;      // ISO date "YYYY-MM-DD" — when to fire next
-  isActive: boolean;
+  nextRunDate: string;            // ISO date "YYYY-MM-DD" — when to fire next
+  isActive: boolean;              // kept for backward compat; derived from status
+  status?: RecurringStatus;       // 'active' | 'paused' | 'completed'
+  endCondition?: RecurringEndCondition; // how the schedule ends
+  endDate?: string;               // ISO date — used when endCondition = 'end_date'
+  maxOccurrences?: number;        // used when endCondition = 'occurrences'
+  occurrencesCount?: number;      // how many transactions have been generated
   notes?: string;
   createdAt: string;
   updatedAt: string;
@@ -193,6 +200,9 @@ export type UpdateBudgetInput = Partial<Omit<DbBudget, "id" | "createdAt" | "upd
 
 export type CreateRecurringInput = Omit<DbRecurringTransaction, "id" | "createdAt" | "updatedAt">;
 export type UpdateRecurringInput = Partial<Omit<DbRecurringTransaction, "id" | "createdAt" | "updatedAt">>;
+
+// ─── Recurring helpers (re-exported for convenience) ─────────────────────────
+// RecurringStatus and RecurringEndCondition are already exported above.
 
 export type CreateGoalInput = Omit<DbGoal, "id" | "createdAt" | "updatedAt">;
 export type UpdateGoalInput = Partial<Omit<DbGoal, "id" | "createdAt" | "updatedAt">>;

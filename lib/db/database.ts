@@ -90,6 +90,12 @@ class DesuBudgetDB extends Dexie {
       transactions: "++id, userId, walletId, categoryId, type, date, syncId, debtId, [userId+date], [userId+type+date], [userId+debtId], [walletId+date], [type+date]",
       debts: "++id, userId, debtType, walletId, status, dueDate, isDeleted, [userId+status], [userId+debtType], [userId+dueDate]",
     });
+
+    // Version 9: recurring enhancements — add status, endCondition, endDate,
+    // maxOccurrences, occurrencesCount indexes for filtering and processing.
+    this.version(9).stores({
+      recurringTransactions: "++id, userId, nextRunDate, isActive, status, walletId, categoryId, [userId+nextRunDate], [userId+status]",
+    });
   }
 }
 

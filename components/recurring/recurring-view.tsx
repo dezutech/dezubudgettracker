@@ -3,7 +3,8 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import {
   Plus, Pencil, Trash2, X, Loader2, Repeat,
-  Calendar, Tag, Pause, Play,
+  Calendar, Tag, Pause, Play, MoreVertical,
+  CheckCircle2, RefreshCw, Hash, Clock,
   Utensils, ShoppingCart, Car, Zap, Tv, ShoppingBag,
   Heart, BookOpen, Home, Briefcase, Laptop,
   TrendingUp, Gift, CirclePlus, Music, Film, Coffee,
@@ -29,7 +30,7 @@ import {
   getCategories,
   getRecurringTransactions,
   getWallets,
-  toggleRecurring,
+  setRecurringStatus,
   updateRecurring,
   type DbCategory,
   type DbRecurringTransaction,
@@ -37,8 +38,12 @@ import {
 } from "@/lib/db";
 import { OFFLINE_USER_ID } from "@/lib/offline/constants";
 
+// ─── Local types ──────────────────────────────────────────────────────────────
+
 type RecurringFrequency = "daily" | "weekly" | "monthly" | "yearly";
 type RecurringType = "income" | "expense";
+type RecurringStatus = "active" | "paused" | "completed";
+type RecurringEndCondition = "forever" | "end_date" | "occurrences";
 
 type SupabaseWallet = {
   id: string;
@@ -56,6 +61,11 @@ type SupabaseRecurringRow = {
   frequency: RecurringFrequency;
   next_run_date: string;
   is_active: boolean;
+  status: RecurringStatus | null;
+  end_condition: RecurringEndCondition | null;
+  end_date: string | null;
+  max_occurrences: number | null;
+  occurrences_count: number | null;
 };
 
 type AppRecurring = {
@@ -69,10 +79,16 @@ type AppRecurring = {
   frequency: RecurringFrequency;
   nextRunDate: string;
   isActive: boolean;
+  status: RecurringStatus;
+  endCondition: RecurringEndCondition;
+  endDate?: string;
+  maxOccurrences?: number;
+  occurrencesCount: number;
   notes?: string;
 };
 
 function mapRecurring(row: SupabaseRecurringRow): AppRecurring {
+  const status: RecurringStatus = row.status ?? (row.is_active ? "active" : "paused");
   return {
     id: row.id,
     user_id: row.user_id,
@@ -83,11 +99,17 @@ function mapRecurring(row: SupabaseRecurringRow): AppRecurring {
     type: row.transaction_type,
     frequency: row.frequency,
     nextRunDate: row.next_run_date,
-    isActive: row.is_active,
+    isActive: status === "active",
+    status,
+    endCondition: row.end_condition ?? "forever",
+    endDate: row.end_date ?? undefined,
+    maxOccurrences: row.max_occurrences ?? undefined,
+    occurrencesCount: row.occurrences_count ?? 0,
   };
 }
 
 function localRecurringToApp(item: DbRecurringTransaction): AppRecurring {
+  const status: RecurringStatus = (item.status as RecurringStatus | undefined) ?? (item.isActive ? "active" : "paused");
   return {
     id: String(item.id),
     user_id: item.userId,
@@ -98,7 +120,12 @@ function localRecurringToApp(item: DbRecurringTransaction): AppRecurring {
     type: item.type === "transfer" ? "expense" : item.type,
     frequency: item.frequency,
     nextRunDate: item.nextRunDate,
-    isActive: item.isActive,
+    isActive: status === "active",
+    status,
+    endCondition: (item.endCondition as RecurringEndCondition | undefined) ?? "forever",
+    endDate: item.endDate,
+    maxOccurrences: item.maxOccurrences,
+    occurrencesCount: item.occurrencesCount ?? 0,
     notes: item.notes,
   };
 }
@@ -130,6 +157,12 @@ const FREQUENCY_CONFIG: Record<RecurringFrequency, { label: string; color: strin
   weekly:  { label: "Weekly",  color: "text-emerald-400",bg: "bg-emerald-500/10"},
   monthly: { label: "Monthly", color: "text-violet-400", bg: "bg-violet-500/10" },
   yearly:  { label: "Yearly",  color: "text-amber-400",  bg: "bg-amber-500/10"  },
+};
+
+const STATUS_CONFIG: Record<RecurringStatus, { label: string; color: string; bg: string }> = {
+  active:    { label: "Active",    color: "text-emerald-400", bg: "bg-emerald-500/10" },
+  paused:    { label: "Paused",    color: "text-zinc-400",    bg: "bg-zinc-800"        },
+  completed: { label: "Completed", color: "text-violet-400",  bg: "bg-violet-500/10"  },
 };
 
 const ICON_MAP = new Map<string, LucideIcon>([
@@ -181,6 +214,10 @@ function nextOccurrence(date: string, frequency: RecurringFrequency): string {
   return toIsoDate(d);
 }
 
+function formatEndDate(dateStr: string): string {
+  return new Date(dateStr + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
 type DueBadge = { label: string; textClass: string; bgClass: string };
 
 function getDueBadge(nextRunDate: string): DueBadge {
@@ -206,6 +243,37 @@ function getDueBadge(nextRunDate: string): DueBadge {
   return { label, textClass: "text-zinc-400", bgClass: "bg-zinc-800" };
 }
 
+// ─── ProgressBadge ────────────────────────────────────────────────────────────
+
+function ProgressBadge({ item }: { item: AppRecurring }) {
+  if (item.endCondition === "occurrences" && item.maxOccurrences) {
+    const pct = Math.min(100, Math.round((item.occurrencesCount / item.maxOccurrences) * 100));
+    return (
+      <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1 text-[10px] text-zinc-500">
+          <Hash size={9} strokeWidth={2.5} />
+          <span className="font-medium text-zinc-400">{item.occurrencesCount}</span>
+          <span>of {item.maxOccurrences}</span>
+        </div>
+        <div className="w-16 h-1 bg-zinc-800 rounded-full overflow-hidden">
+          <div
+            className="h-full bg-violet-500 rounded-full transition-all"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      </div>
+    );
+  }
+  if (item.endCondition === "end_date" && item.endDate) {
+    return (
+      <div className="flex items-center gap-1 text-[10px] text-zinc-500">
+        <Clock size={9} strokeWidth={2.5} />
+        <span>Ends {formatEndDate(item.endDate)}</span>
+      </div>
+    );
+  }
+  return null;
+}
 
 // ─── UpcomingCard ─────────────────────────────────────────────────────────────
 
@@ -269,6 +337,80 @@ function UpcomingCard({
   );
 }
 
+// ─── MobileActionMenu ─────────────────────────────────────────────────────────
+
+function MobileActionMenu({
+  item,
+  onPause,
+  onResume,
+  onReactivate,
+  onEdit,
+  onDelete,
+}: {
+  item: AppRecurring;
+  onPause: () => void;
+  onResume: () => void;
+  onReactivate: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  const menuItemClass = "flex items-center gap-2 w-full px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-700/60 transition-colors text-left";
+
+  return (
+    <div className="relative sm:hidden" ref={ref}>
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-8 h-8 rounded-lg flex items-center justify-center text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+        aria-label="More actions"
+      >
+        <MoreVertical size={15} strokeWidth={2} />
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-9 z-30 min-w-[148px] rounded-xl bg-zinc-800 ring-1 ring-white/10 shadow-xl py-1 overflow-hidden">
+          {item.status === "active" && (
+            <button className={menuItemClass} onClick={() => { onPause(); setOpen(false); }}>
+              <Pause size={13} strokeWidth={2} className="text-amber-400" /> Pause
+            </button>
+          )}
+          {item.status === "paused" && (
+            <button className={menuItemClass} onClick={() => { onResume(); setOpen(false); }}>
+              <Play size={13} strokeWidth={2} className="text-emerald-400" /> Resume
+            </button>
+          )}
+          {item.status === "completed" && (
+            <button className={menuItemClass} onClick={() => { onReactivate(); setOpen(false); }}>
+              <RefreshCw size={13} strokeWidth={2} className="text-violet-400" /> Reactivate
+            </button>
+          )}
+          <button className={menuItemClass} onClick={() => { onEdit(); setOpen(false); }}>
+            <Pencil size={13} strokeWidth={2} className="text-zinc-400" /> Edit
+          </button>
+          <div className="my-1 border-t border-zinc-700/60" />
+          <button
+            className="flex items-center gap-2 w-full px-3 py-2 text-sm text-rose-400 hover:bg-rose-500/10 transition-colors text-left"
+            onClick={() => { onDelete(); setOpen(false); }}
+          >
+            <Trash2 size={13} strokeWidth={2} /> Delete
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── RecurringCard ────────────────────────────────────────────────────────────
 
 function RecurringCard({
@@ -277,14 +419,18 @@ function RecurringCard({
   walMap,
   onEdit,
   onDelete,
-  onToggle,
+  onPause,
+  onResume,
+  onReactivate,
 }: {
   item: AppRecurring;
   catMap: Map<string, SupabaseCategory>;
   walMap: Map<string, SupabaseWallet>;
   onEdit: () => void;
   onDelete: () => void;
-  onToggle: () => void;
+  onPause: () => void;
+  onResume: () => void;
+  onReactivate: () => void;
 }) {
   const { formatCurrency } = useCurrency();
   const cat       = catMap.get(item.categoryId);
@@ -292,12 +438,17 @@ function RecurringCard({
   const Icon      = getIcon(cat?.icon ?? "Tag");
   const colorInfo = getColor(cat?.color ?? "zinc");
   const freqCfg   = FREQUENCY_CONFIG[item.frequency];
+  const statusCfg = STATUS_CONFIG[item.status];
   const badge     = getDueBadge(item.nextRunDate);
+  const isCompleted = item.status === "completed";
+  const isActive    = item.status === "active";
 
   return (
     <div className={cn(
       "dezu-card flex flex-col gap-3 rounded-[1.15rem] bg-card/90 p-4 transition-all group",
-      item.isActive ? "ring-zinc-800 hover:ring-zinc-700" : "ring-zinc-800/50 opacity-60"
+      isCompleted ? "ring-zinc-800/40 opacity-50" :
+      !isActive   ? "ring-zinc-800/50 opacity-65" :
+                    "ring-zinc-800 hover:ring-zinc-700"
     )}>
       {/* top row */}
       <div className="flex items-start gap-3">
@@ -306,14 +457,14 @@ function RecurringCard({
         </div>
 
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-sm font-semibold text-zinc-100 truncate">{item.title}</span>
             <span className={cn("text-[10px] font-semibold px-2 py-0.5 rounded-full leading-none", freqCfg.bg, freqCfg.color)}>
               {freqCfg.label}
             </span>
-            {!item.isActive && (
-              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full leading-none bg-zinc-800 text-zinc-500">
-                Paused
+            {item.status !== "active" && (
+              <span className={cn("text-[10px] font-semibold px-2 py-0.5 rounded-full leading-none", statusCfg.bg, statusCfg.color)}>
+                {statusCfg.label}
               </span>
             )}
           </div>
@@ -322,43 +473,75 @@ function RecurringCard({
           </p>
         </div>
 
-        {/* active toggle */}
-        <button
-          onClick={onToggle}
-          title={item.isActive ? "Pause" : "Resume"}
-          className={cn(
-            "w-8 h-8 rounded-lg flex items-center justify-center transition-colors shrink-0",
-            item.isActive
-              ? "text-zinc-500 hover:text-amber-400 hover:bg-amber-500/10"
-              : "text-zinc-500 hover:text-emerald-400 hover:bg-emerald-500/10"
-          )}
-        >
-          {item.isActive ? <Pause size={14} strokeWidth={2} /> : <Play size={14} strokeWidth={2} />}
-        </button>
+        {/* mobile 3-dot menu */}
+        <MobileActionMenu
+          item={item}
+          onPause={onPause}
+          onResume={onResume}
+          onReactivate={onReactivate}
+          onEdit={onEdit}
+          onDelete={onDelete}
+        />
       </div>
 
       {/* detail row */}
-      <div className="flex items-center gap-3 text-xs text-zinc-500 flex-wrap">
-        <div className="flex items-center gap-1">
-          <Calendar size={11} strokeWidth={2} />
-          <span>Next:</span>
-          <span className={cn("font-medium px-1.5 py-0.5 rounded", badge.bgClass, badge.textClass)}>
-            {badge.label}
-          </span>
-        </div>
+      <div className="flex items-center gap-2 text-xs text-zinc-500 flex-wrap">
+        {!isCompleted && (
+          <div className="flex items-center gap-1">
+            <Calendar size={11} strokeWidth={2} />
+            <span>Next:</span>
+            <span className={cn("font-medium px-1.5 py-0.5 rounded", badge.bgClass, badge.textClass)}>
+              {badge.label}
+            </span>
+          </div>
+        )}
+        {isCompleted && (
+          <div className="flex items-center gap-1 text-violet-400">
+            <CheckCircle2 size={11} strokeWidth={2} />
+            <span className="text-[11px] font-medium">Schedule complete</span>
+          </div>
+        )}
         {cat && <span>· {cat.name}</span>}
         {wallet && <span>· {wallet.name}</span>}
-        {item.notes && <span className="truncate max-w-[120px]">· {item.notes}</span>}
       </div>
 
-      {/* action buttons */}
-      <div className="flex items-center gap-1 pt-1 border-t border-zinc-800 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
-        <button
-          onClick={onEdit}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-400 hover:text-[var(--theme-primary)] hover:bg-[var(--theme-primary-soft)] transition-colors"
-        >
-          <Pencil size={12} strokeWidth={2} /> Edit
-        </button>
+      {/* progress row */}
+      <ProgressBadge item={item} />
+
+      {/* desktop action buttons */}
+      <div className="hidden sm:flex items-center gap-1 pt-1 border-t border-zinc-800 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+        {isActive && (
+          <button
+            onClick={onPause}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-400 hover:text-amber-400 hover:bg-amber-500/10 transition-colors"
+          >
+            <Pause size={12} strokeWidth={2} /> Pause
+          </button>
+        )}
+        {item.status === "paused" && (
+          <button
+            onClick={onResume}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+          >
+            <Play size={12} strokeWidth={2} /> Resume
+          </button>
+        )}
+        {isCompleted && (
+          <button
+            onClick={onReactivate}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-400 hover:text-violet-400 hover:bg-violet-500/10 transition-colors"
+          >
+            <RefreshCw size={12} strokeWidth={2} /> Reactivate
+          </button>
+        )}
+        {!isCompleted && (
+          <button
+            onClick={onEdit}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-400 hover:text-[var(--theme-primary)] hover:bg-[var(--theme-primary-soft)] transition-colors"
+          >
+            <Pencil size={12} strokeWidth={2} /> Edit
+          </button>
+        )}
         <button
           onClick={onDelete}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors ml-auto"
@@ -396,17 +579,19 @@ function AddEditModal({
 }) {
   const isEdit = state.mode === "edit";
 
-  const [title,       setTitle]       = useState("");
-  const [type,        setType]        = useState<"income" | "expense">("expense");
-  const [amount,      setAmount]      = useState("");
-  const [categoryId,  setCategoryId]  = useState("");
-  const [walletId,    setWalletId]    = useState("");
-  const [frequency,   setFrequency]   = useState<RecurringFrequency>("monthly");
-  const [nextRunDate, setNextRunDate] = useState(todayIso());
-  const [isActive,    setIsActive]    = useState(true);
-  const [notes,       setNotes]       = useState("");
-  const [saving,      setSaving]      = useState(false);
-  const [error,       setError]       = useState("");
+  const [title,          setTitle]          = useState("");
+  const [type,           setType]           = useState<"income" | "expense">("expense");
+  const [amount,         setAmount]         = useState("");
+  const [categoryId,     setCategoryId]     = useState("");
+  const [walletId,       setWalletId]       = useState("");
+  const [frequency,      setFrequency]      = useState<RecurringFrequency>("monthly");
+  const [nextRunDate,    setNextRunDate]     = useState(todayIso());
+  const [endCondition,   setEndCondition]   = useState<RecurringEndCondition>("forever");
+  const [endDate,        setEndDate]        = useState("");
+  const [maxOccurrences, setMaxOccurrences] = useState("");
+  const [notes,          setNotes]          = useState("");
+  const [saving,         setSaving]         = useState(false);
+  const [error,          setError]          = useState("");
 
   useEffect(() => {
     if (state.mode === "edit") {
@@ -418,13 +603,16 @@ function AddEditModal({
       setWalletId(it.walletId);
       setFrequency(it.frequency);
       setNextRunDate(it.nextRunDate);
-      setIsActive(it.isActive);
+      setEndCondition(it.endCondition);
+      setEndDate(it.endDate ?? "");
+      setMaxOccurrences(it.maxOccurrences ? String(it.maxOccurrences) : "");
       setNotes(it.notes ?? "");
     } else {
       setTitle(""); setType("expense"); setAmount("");
       setCategoryId(""); setWalletId("");
       setFrequency("monthly"); setNextRunDate(todayIso());
-      setIsActive(true); setNotes("");
+      setEndCondition("forever"); setEndDate(""); setMaxOccurrences("");
+      setNotes("");
     }
     setError("");
   }, [state]);
@@ -434,6 +622,18 @@ function AddEditModal({
     [categories, type]
   );
 
+  function validateEndCondition(): string | null {
+    if (endCondition === "end_date") {
+      if (!endDate) return "Select an end date.";
+      if (endDate <= nextRunDate) return "End date must be after the start date.";
+    }
+    if (endCondition === "occurrences") {
+      const n = Number(maxOccurrences);
+      if (!maxOccurrences || isNaN(n) || n < 1) return "Enter a valid number of occurrences (minimum 1).";
+    }
+    return null;
+  }
+
   async function handleSave() {
     if (state.mode === "closed") return;
     const parsed = Number(amount);
@@ -441,9 +641,15 @@ function AddEditModal({
     if (!amount || isNaN(parsed) || parsed <= 0) { setError("Enter a valid amount."); return; }
     if (!categoryId) { setError("Select a category."); return; }
     if (!walletId)   { setError("Select a wallet.");   return; }
+    const endErr = validateEndCondition();
+    if (endErr) { setError(endErr); return; }
 
     setSaving(true); setError("");
     try {
+      const endConditionPayload = endCondition;
+      const endDatePayload = endCondition === "end_date" ? endDate : undefined;
+      const maxOccPayload  = endCondition === "occurrences" ? Number(maxOccurrences) : undefined;
+
       if (isOffline) {
         const payload = {
           userId: OFFLINE_USER_ID,
@@ -454,11 +660,16 @@ function AddEditModal({
           walletId: Number(walletId),
           frequency,
           nextRunDate,
-          isActive,
+          isActive: state.mode === "edit" ? state.item.isActive : true,
+          status: state.mode === "edit" ? state.item.status : ("active" as RecurringStatus),
+          endCondition: endConditionPayload,
+          endDate: endDatePayload,
+          maxOccurrences: maxOccPayload,
+          occurrencesCount: state.mode === "edit" ? state.item.occurrencesCount : 0,
           notes: notes.trim() || undefined,
         };
         if (state.mode === "add") {
-          await createRecurring(payload);
+          await createRecurring(payload as Parameters<typeof createRecurring>[0]);
         } else if (state.mode === "edit") {
           await updateRecurring(Number(state.item.id), payload);
         }
@@ -482,19 +693,22 @@ function AddEditModal({
         wallet_id: walletId,
         frequency,
         next_run_date: nextRunDate,
-        is_active: isActive,
+        end_condition: endConditionPayload,
+        end_date: endDatePayload ?? null,
+        max_occurrences: maxOccPayload ?? null,
       };
 
       if (state.mode === "add") {
         const { error: insertError } = await loggedSupabase(
           "recurring insert",
-          supabase.from("recurring_transactions").insert(payload)
+          supabase.from("recurring_transactions").insert({
+            ...payload,
+            is_active: true,
+            status: "active",
+            occurrences_count: 0,
+          })
         );
-
-        if (insertError) {
-          setError(insertError.message);
-          return;
-        }
+        if (insertError) { setError(insertError.message); return; }
       } else if (state.mode === "edit") {
         if (!state.item.id) {
           setError("Missing recurring transaction id. Close and reopen this item, then try again.");
@@ -508,17 +722,14 @@ function AddEditModal({
             .update(payload)
             .eq("id", state.item.id)
             .eq("user_id", userId)
-            .select("id,user_id,wallet_id,category_id,title,amount,transaction_type,frequency,next_run_date,is_active")
+            .select("id,user_id,wallet_id,category_id,title,amount,transaction_type,frequency,next_run_date,is_active,status,end_condition,end_date,max_occurrences,occurrences_count")
         );
 
-        if (updateError) {
-          setError(updateError.message);
-          return;
-        }
+        if (updateError) { setError(updateError.message); return; }
 
         const updatedItem = ((updatedRows ?? []) as SupabaseRecurringRow[])[0]
           ? mapRecurring(((updatedRows ?? []) as SupabaseRecurringRow[])[0])
-          : {
+          : ({
               ...state.item,
               title: payload.title,
               amount: payload.amount,
@@ -527,16 +738,18 @@ function AddEditModal({
               walletId: payload.wallet_id,
               frequency: payload.frequency,
               nextRunDate: payload.next_run_date,
-              isActive: payload.is_active,
-            };
+              endCondition: endConditionPayload,
+              endDate: endDatePayload,
+              maxOccurrences: maxOccPayload,
+            } as AppRecurring);
         onSaved(updatedItem);
         onClose();
         return;
       }
       onSaved();
       onClose();
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "Failed to save recurring transaction.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save recurring transaction.");
     } finally {
       setSaving(false);
     }
@@ -669,7 +882,7 @@ function AddEditModal({
             </div>
           </div>
 
-          {/* next run date */}
+          {/* start/next run date */}
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
               {isEdit ? "Next Run Date" : "Start Date"}
@@ -687,6 +900,68 @@ function AddEditModal({
             )}
           </div>
 
+          {/* end condition */}
+          <div className="flex flex-col gap-2">
+            <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Ends</label>
+            <div className="grid grid-cols-3 gap-1 p-1 bg-zinc-800 rounded-lg">
+              {([
+                { key: "forever",     label: "Forever"  },
+                { key: "end_date",    label: "On Date"  },
+                { key: "occurrences", label: "# Times"  },
+              ] as const).map(({ key, label }) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setEndCondition(key)}
+                  className={cn(
+                    "py-1.5 rounded-md text-xs font-medium transition-colors",
+                    endCondition === key
+                      ? "bg-violet-500/15 text-violet-300"
+                      : "text-zinc-400 hover:text-zinc-200"
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {endCondition === "end_date" && (
+              <div className="flex flex-col gap-1">
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  min={nextRunDate}
+                  className="h-9 w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500/60 transition-colors [color-scheme:dark]"
+                />
+                <p className="text-[11px] text-zinc-500">No transactions will be created after this date.</p>
+              </div>
+            )}
+
+            {endCondition === "occurrences" && (
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={maxOccurrences}
+                    onChange={(e) => setMaxOccurrences(e.target.value)}
+                    placeholder="12"
+                    className="h-9 w-28 rounded-lg border border-zinc-700 bg-zinc-800 px-3 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500/60 transition-colors"
+                  />
+                  <span className="text-sm text-zinc-400">occurrences</span>
+                </div>
+                {isEdit && state.mode === "edit" && maxOccurrences && (
+                  <p className="text-[11px] text-zinc-500">
+                    {state.item.occurrencesCount ?? 0} of {maxOccurrences} generated so far.
+                  </p>
+                )}
+                <p className="text-[11px] text-zinc-500">Automatically completes after this many transactions.</p>
+              </div>
+            )}
+          </div>
+
           {/* notes */}
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Notes <span className="normal-case text-zinc-600">(optional)</span></label>
@@ -697,27 +972,6 @@ function AddEditModal({
               rows={2}
               className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500/60 transition-colors resize-none"
             />
-          </div>
-
-          {/* active toggle */}
-          <div className="flex items-center justify-between py-1">
-            <div>
-              <p className="text-sm font-medium text-zinc-200">Active</p>
-              <p className="text-xs text-zinc-500">Paused recurring won't generate transactions</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setIsActive(!isActive)}
-              className={cn(
-                "relative w-10 h-5 rounded-full transition-colors focus:outline-none shrink-0",
-                isActive ? "bg-emerald-500" : "bg-zinc-700"
-              )}
-            >
-              <span className={cn(
-                "absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform",
-                isActive ? "translate-x-5" : "translate-x-0"
-              )} />
-            </button>
           </div>
 
           {error && (
@@ -814,16 +1068,18 @@ function DeleteConfirmModal({
 
 // ─── RecurringView (main) ─────────────────────────────────────────────────────
 
-type FilterTab = "all" | "active" | "paused";
+type StatusFilter = "all" | "active" | "paused" | "completed";
+type TypeFilter   = "all" | "income" | "expense";
 
 export function RecurringView() {
   const { user, loading: authLoading, isLoggingOut, isGuest } = useAuth();
-  const [filter,       setFilter]       = useState<FilterTab>("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [typeFilter,   setTypeFilter]   = useState<TypeFilter>("all");
   const [modal,        setModal]        = useState<ModalState>({ mode: "closed" });
   const [deleteTarget, setDeleteTarget] = useState<AppRecurring | null>(null);
   const [deleting,     setDeleting]     = useState(false);
   const [deleteError,  setDeleteError]  = useState("");
-  const [toggling,     setToggling]     = useState<string | null>(null);
+  const [actioning,    setActioning]    = useState<string | null>(null);
   const [recurring,    setRecurring]    = useState<AppRecurring[]>([]);
   const [categories,   setCategories]   = useState<SupabaseCategory[]>([]);
   const [wallets,      setWallets]      = useState<SupabaseWallet[]>([]);
@@ -870,7 +1126,7 @@ export function RecurringView() {
           "recurring",
           supabase
             .from("recurring_transactions")
-            .select("id,user_id,wallet_id,category_id,title,amount,transaction_type,frequency,next_run_date,is_active")
+            .select("id,user_id,wallet_id,category_id,title,amount,transaction_type,frequency,next_run_date,is_active,status,end_condition,end_date,max_occurrences,occurrences_count")
             .eq("user_id", user.id)
             .eq("is_deleted", false)
             .order("next_run_date", { ascending: true })
@@ -892,15 +1148,15 @@ export function RecurringView() {
       const errors = [recurringSettled, categoriesSettled, walletSettled].map(settledError).filter(Boolean);
       if (errors.length > 0) setLoadError(errors.join(" | "));
 
-      const recurringResult = recurringSettled.status === "fulfilled" ? recurringSettled.value : { data: [] };
-      const categoriesResult = categoriesSettled.status === "fulfilled" ? categoriesSettled.value : [];
-      const walletResult = walletSettled.status === "fulfilled" ? walletSettled.value : { data: [] };
+      const recurringResult   = recurringSettled.status   === "fulfilled" ? recurringSettled.value   : { data: [] };
+      const categoriesResult  = categoriesSettled.status  === "fulfilled" ? categoriesSettled.value  : [];
+      const walletResult      = walletSettled.status      === "fulfilled" ? walletSettled.value      : { data: [] };
       setRecurring(((recurringResult.data ?? []) as SupabaseRecurringRow[]).map(mapRecurring));
       setCategories(categoriesResult);
       setWallets((walletResult.data ?? []) as SupabaseWallet[]);
-    } catch (error) {
+    } catch (err) {
       if (!isCurrent()) return;
-      setLoadError(error instanceof Error ? error.message : "Failed to load recurring transactions.");
+      setLoadError(err instanceof Error ? err.message : "Failed to load recurring transactions.");
       setRecurring([]);
       setCategories([]);
       setWallets([]);
@@ -912,64 +1168,48 @@ export function RecurringView() {
   useEffect(() => {
     let mounted = true;
     loadRecurring(() => mounted);
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, [loadRecurring]);
 
   const catMap = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories]);
   const walMap = useMemo(() => new Map(wallets.map((w) => [w.id, w])), [wallets]);
 
-  // upcoming = active items due within 7 days
-  const upcoming = useMemo(() => {
-    const today   = todayIso();
-    const inWeek  = new Date();
-    inWeek.setDate(inWeek.getDate() + 7);
-    const inWeekStr = toIsoDate(inWeek);
-    return recurring.filter((r) => r.isActive && r.nextRunDate >= today && r.nextRunDate <= inWeekStr);
-  }, [recurring]);
-
-  // also include overdue as "upcoming"
   const upcomingWithOverdue = useMemo(() => {
-    const today = todayIso();
     const inWeek = new Date();
     inWeek.setDate(inWeek.getDate() + 7);
     const inWeekStr = toIsoDate(inWeek);
-    return recurring.filter((r) => r.isActive && r.nextRunDate <= inWeekStr);
+    return recurring.filter((r) => r.status === "active" && r.nextRunDate <= inWeekStr);
   }, [recurring]);
 
   const filtered = useMemo(() => {
-    if (filter === "active") return recurring.filter((r) => r.isActive);
-    if (filter === "paused") return recurring.filter((r) => !r.isActive);
-    return recurring;
-  }, [recurring, filter]);
+    let result = recurring;
+    if (statusFilter !== "all") result = result.filter((r) => r.status === statusFilter);
+    if (typeFilter !== "all")   result = result.filter((r) => r.type === typeFilter);
+    return result;
+  }, [recurring, statusFilter, typeFilter]);
 
   const counts = useMemo(() => ({
-    all:    recurring.length,
-    active: recurring.filter((r) => r.isActive).length,
-    paused: recurring.filter((r) => !r.isActive).length,
+    all:       recurring.length,
+    active:    recurring.filter((r) => r.status === "active").length,
+    paused:    recurring.filter((r) => r.status === "paused").length,
+    completed: recurring.filter((r) => r.status === "completed").length,
   }), [recurring]);
 
   function handleRecurringSaved(updatedItem?: AppRecurring) {
     if (updatedItem) {
-      setRecurring((current) =>
-        current.map((item) => item.id === updatedItem.id ? updatedItem : item)
-      );
+      setRecurring((current) => current.map((item) => item.id === updatedItem.id ? updatedItem : item));
     }
-
     void loadRecurring(undefined, { silent: true });
   }
 
-  async function handleToggle(item: AppRecurring) {
-    setToggling(item.id);
+  async function handleSetStatus(item: AppRecurring, newStatus: RecurringStatus) {
+    setActioning(item.id);
     setActionError("");
     try {
       if (isGuest) {
-        await toggleRecurring(Number(item.id), !item.isActive);
+        await setRecurringStatus(Number(item.id), newStatus);
         setRecurring((current) =>
-          current.map((recurringItem) =>
-            recurringItem.id === item.id ? { ...recurringItem, isActive: !item.isActive } : recurringItem
-          )
+          current.map((r) => r.id === item.id ? { ...r, status: newStatus, isActive: newStatus === "active" } : r)
         );
         void loadRecurring(undefined, { silent: true });
         return;
@@ -978,27 +1218,20 @@ export function RecurringView() {
       const supabase = createClient();
       const { error } = await supabase
         .from("recurring_transactions")
-        .update({ is_active: !item.isActive })
+        .update({ is_active: newStatus === "active", status: newStatus })
         .eq("id", item.id)
         .eq("user_id", item.user_id);
 
-      if (error) {
-        setActionError(error.message);
-        return;
-      }
+      if (error) { setActionError(error.message); return; }
 
       setRecurring((current) =>
-        current.map((recurringItem) =>
-          recurringItem.id === item.id
-            ? { ...recurringItem, isActive: !item.isActive }
-            : recurringItem
-        )
+        current.map((r) => r.id === item.id ? { ...r, status: newStatus, isActive: newStatus === "active" } : r)
       );
       void loadRecurring(undefined, { silent: true });
-    } catch (error) {
-      setActionError(error instanceof Error ? error.message : "Failed to update recurring transaction.");
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to update recurring transaction.");
     } finally {
-      setToggling(null);
+      setActioning(null);
     }
   }
 
@@ -1022,16 +1255,13 @@ export function RecurringView() {
         .eq("id", deleteTarget.id)
         .eq("user_id", deleteTarget.user_id);
 
-      if (error) {
-        setDeleteError(error.message);
-        return;
-      }
+      if (error) { setDeleteError(error.message); return; }
 
       setDeleteTarget(null);
       setRecurring((current) => current.filter((item) => item.id !== deleteTarget.id));
       void loadRecurring(undefined, { silent: true });
-    } catch (error) {
-      setDeleteError(error instanceof Error ? error.message : "Failed to delete recurring transaction.");
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Failed to delete recurring transaction.");
     } finally {
       setDeleting(false);
     }
@@ -1045,7 +1275,10 @@ export function RecurringView() {
           <div>
             <h1 className="text-xl font-bold text-zinc-50 tracking-tight">Recurring</h1>
             <p className="text-sm text-zinc-500 mt-0.5">
-              {loading ? "Loading…" : `${counts.active} active · ${counts.paused} paused`}
+              {loading
+                ? "Loading…"
+                : `${counts.active} active · ${counts.paused} paused${counts.completed > 0 ? ` · ${counts.completed} completed` : ""}`
+              }
             </p>
           </div>
           <button
@@ -1080,33 +1313,64 @@ export function RecurringView() {
               <UpcomingCard items={upcomingWithOverdue} catMap={catMap} />
             )}
 
-            {/* filter tabs */}
-            <div className="flex items-center gap-0.5 p-1 bg-zinc-900 rounded-lg ring-1 ring-zinc-800 w-fit">
-              {(
-                [
-                  { key: "all",    label: "All"    },
-                  { key: "active", label: "Active" },
-                  { key: "paused", label: "Paused" },
-                ] as const
-              ).map(({ key, label }) => (
-                <button
-                  key={key}
-                  onClick={() => setFilter(key)}
-                  className={cn(
-                    "flex items-center gap-1.5 px-4 py-1.5 rounded-md text-xs font-medium transition-colors",
-                    filter === key
-                      ? key === "active" ? "bg-emerald-500/15 text-emerald-300"
-                      : key === "paused"  ? "bg-zinc-700 text-zinc-300"
-                      : "theme-selected"
-                      : "text-zinc-400 hover:text-zinc-200"
-                  )}
-                >
-                  {label}
-                  <span className={cn("text-[10px] font-semibold tabular-nums min-w-[16px] text-center rounded px-1", filter === key ? "opacity-70" : "text-zinc-600")}>
-                    {counts[key]}
-                  </span>
-                </button>
-              ))}
+            {/* filter bar */}
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* status tabs */}
+              <div className="flex items-center gap-0.5 p-1 bg-zinc-900 rounded-lg ring-1 ring-zinc-800">
+                {(
+                  [
+                    { key: "all",       label: "All"       },
+                    { key: "active",    label: "Active"    },
+                    { key: "paused",    label: "Paused"    },
+                    { key: "completed", label: "Completed" },
+                  ] as const
+                ).map(({ key, label }) => (
+                  <button
+                    key={key}
+                    onClick={() => setStatusFilter(key)}
+                    className={cn(
+                      "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
+                      statusFilter === key
+                        ? key === "active"    ? "bg-emerald-500/15 text-emerald-300"
+                        : key === "paused"    ? "bg-zinc-700 text-zinc-300"
+                        : key === "completed" ? "bg-violet-500/15 text-violet-300"
+                        : "theme-selected"
+                        : "text-zinc-400 hover:text-zinc-200"
+                    )}
+                  >
+                    {label}
+                    <span className={cn("text-[10px] font-semibold tabular-nums min-w-[16px] text-center rounded px-1", statusFilter === key ? "opacity-70" : "text-zinc-600")}>
+                      {counts[key]}
+                    </span>
+                  </button>
+                ))}
+              </div>
+
+              {/* type filter */}
+              <div className="flex items-center gap-0.5 p-1 bg-zinc-900 rounded-lg ring-1 ring-zinc-800">
+                {(
+                  [
+                    { key: "all",     label: "All Types" },
+                    { key: "income",  label: "Income"    },
+                    { key: "expense", label: "Expense"   },
+                  ] as const
+                ).map(({ key, label }) => (
+                  <button
+                    key={key}
+                    onClick={() => setTypeFilter(key)}
+                    className={cn(
+                      "px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
+                      typeFilter === key
+                        ? key === "income"  ? "bg-emerald-500/15 text-emerald-300"
+                        : key === "expense" ? "bg-rose-500/15 text-rose-300"
+                        : "theme-selected"
+                        : "text-zinc-400 hover:text-zinc-200"
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* list */}
@@ -1117,13 +1381,15 @@ export function RecurringView() {
                 </div>
                 <div className="text-center">
                   <p className="text-sm font-semibold text-zinc-300">
-                    {filter === "all" ? "No recurring transactions" : `No ${filter} recurring transactions`}
+                    {statusFilter === "all" && typeFilter === "all"
+                      ? "No recurring transactions"
+                      : "No matching recurring transactions"}
                   </p>
                   <p className="text-xs text-zinc-500 mt-1 max-w-xs">
                     Set up recurring transactions to automatically track repeating income or expenses.
                   </p>
                 </div>
-                {filter === "all" && (
+                {statusFilter === "all" && typeFilter === "all" && (
                   <button
                     onClick={() => setModal({ mode: "add" })}
                     className="theme-hover flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[var(--theme-card)] font-medium text-sm transition-colors ring-1 ring-border"
@@ -1143,7 +1409,9 @@ export function RecurringView() {
                     walMap={walMap}
                     onEdit={() => setModal({ mode: "edit", item })}
                     onDelete={() => setDeleteTarget(item)}
-                    onToggle={() => !toggling && handleToggle(item)}
+                    onPause={() => !actioning && handleSetStatus(item, "paused")}
+                    onResume={() => !actioning && handleSetStatus(item, "active")}
+                    onReactivate={() => !actioning && handleSetStatus(item, "active")}
                   />
                 ))}
               </div>
