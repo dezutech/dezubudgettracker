@@ -249,8 +249,6 @@ export type DashboardData = {
   billSummary: {
     dueThisMonthCount: number;
     dueThisMonthAmount: number;
-    upcomingCount: number;
-    upcomingAmount: number;
     overdueCount: number;
     overdueAmount: number;
     paidThisMonthCount: number;
@@ -276,6 +274,16 @@ function monthRange(month: string): { start: string; end: string } {
   const [year, mo] = month.split("-").map(Number);
   const lastDay = new Date(year, mo, 0).getDate();
   return { start: `${month}-01`, end: `${month}-${String(lastDay).padStart(2, "0")}` };
+}
+
+function toIsoDate(date: Date): string {
+  return date.toISOString().split("T")[0];
+}
+
+function billsPageMonthBounds(date = new Date()): { start: string; end: string } {
+  const start = new Date(date.getFullYear(), date.getMonth(), 1);
+  const end = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+  return { start: toIsoDate(start), end: toIsoDate(end) };
 }
 
 function addMonths(month: string, delta: number): string {
@@ -325,10 +333,6 @@ function weekRange(): { start: string; end: string } {
 function yearRange(month: string): { start: string; end: string } {
   const [year] = month.split("-").map(Number);
   return { start: `${year}-01-01`, end: `${year}-12-31` };
-}
-
-function toIsoDate(date: Date): string {
-  return date.toISOString().split("T")[0];
 }
 
 function buildFinancialOverview(txs: DbTransaction[], month: string) {
@@ -399,23 +403,26 @@ function summarizeSpendingCategories(
     });
 }
 
-function summarizeLocalBills(bills: DbBill[], month: string) {
-  const { start: monthStart, end: monthEnd } = monthRange(month);
+function summarizeLocalBills(bills: DbBill[], _month: string) {
   const today = new Date().toISOString().split("T")[0];
-  const upcomingEndDate = new Date(today + "T00:00:00");
-  upcomingEndDate.setDate(upcomingEndDate.getDate() + 30);
-  const upcomingEnd = upcomingEndDate.toISOString().split("T")[0];
+  const { start: monthStart, end: monthEnd } = billsPageMonthBounds();
+  // Keep this amount in lockstep with Bills page "Due This Month":
+  // raw unpaid status + Bills page month bounds only. Do not replace with
+  // upcoming, remaining, next-30-days, or effective overdue totals.
+  const dueThisMonthRaw = bills.filter(
+    (bill) => bill.dueDate >= monthStart && bill.dueDate <= monthEnd && bill.status !== "paid"
+  );
   const normalized = bills.map((bill) => ({
     ...bill,
     effectiveStatus: bill.status === "paid" ? "paid" : bill.dueDate < today ? "overdue" : bill.status,
   }));
   const active = normalized.filter((bill) => bill.effectiveStatus !== "paid");
-  const dueThisMonth = active.filter((bill) => bill.dueDate >= monthStart && bill.dueDate <= monthEnd);
-  const upcoming = active.filter((bill) => bill.dueDate >= today && bill.dueDate <= upcomingEnd);
+  const dueThisMonthIds = new Set(dueThisMonthRaw.map((bill) => bill.id));
+  const dueThisMonth = normalized.filter((bill) => dueThisMonthIds.has(bill.id));
   const overdue = active.filter((bill) => bill.effectiveStatus === "overdue");
   const paidThisMonth = normalized.filter((bill) => bill.status === "paid" && bill.dueDate >= monthStart && bill.dueDate <= monthEnd);
-  const visibleBills = active
-    .filter((bill) => bill.effectiveStatus === "overdue" || (bill.dueDate >= today && bill.dueDate <= upcomingEnd))
+  const visibleBills = [...overdue, ...dueThisMonth]
+    .filter((bill, index, all) => all.findIndex((item) => item.id === bill.id) === index)
     .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
     .slice(0, 5)
     .map((bill) => ({
@@ -433,8 +440,6 @@ function summarizeLocalBills(bills: DbBill[], month: string) {
     billSummary: {
       dueThisMonthCount: dueThisMonth.length,
       dueThisMonthAmount: dueThisMonth.reduce((sum, bill) => sum + bill.amount, 0),
-      upcomingCount: upcoming.length,
-      upcomingAmount: upcoming.reduce((sum, bill) => sum + bill.amount, 0),
       overdueCount: overdue.length,
       overdueAmount: overdue.reduce((sum, bill) => sum + bill.amount, 0),
       paidThisMonthCount: paidThisMonth.length,

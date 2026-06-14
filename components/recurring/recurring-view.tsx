@@ -5,6 +5,7 @@ import {
   Plus, Pencil, Trash2, X, Loader2, Repeat,
   Calendar, Tag, Pause, Play, MoreVertical,
   CheckCircle2, RefreshCw, Hash, Clock,
+  Search, SlidersHorizontal,
   Utensils, ShoppingCart, Car, Zap, Tv, ShoppingBag,
   Heart, BookOpen, Home, Briefcase, Laptop,
   TrendingUp, Gift, CirclePlus, Music, Film, Coffee,
@@ -22,6 +23,7 @@ import { loggedSupabase, settledError } from "@/lib/supabase/query";
 import { useAuth } from "@/context/auth-context";
 import { useCurrency } from "@/context/currency-context";
 import { CurrencyInputPrefix } from "@/components/ui/currency-input-prefix";
+import { Input } from "@/components/ui/input";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -1069,12 +1071,156 @@ function DeleteConfirmModal({
 // ─── RecurringView (main) ─────────────────────────────────────────────────────
 
 type StatusFilter = "all" | "active" | "paused" | "completed";
-type TypeFilter   = "all" | "income" | "expense";
+type TypeFilter   = "all" | "income" | "expense" | "transfer";
+type FrequencyFilter = "all" | RecurringFrequency;
+
+type RecurringFilterCounts = {
+  status: Record<StatusFilter, number>;
+  type: Record<TypeFilter, number>;
+  frequency: Record<FrequencyFilter, number>;
+};
+
+function RecurringFilterSheet({
+  open,
+  statusValue,
+  typeValue,
+  frequencyValue,
+  counts,
+  onApply,
+  onClear,
+  onClose,
+}: {
+  open: boolean;
+  statusValue: StatusFilter;
+  typeValue: TypeFilter;
+  frequencyValue: FrequencyFilter;
+  counts: RecurringFilterCounts;
+  onApply: (filters: { status: StatusFilter; type: TypeFilter; frequency: FrequencyFilter }) => void;
+  onClear: () => void;
+  onClose: () => void;
+}) {
+  const [draftStatus, setDraftStatus] = useState<StatusFilter>(statusValue);
+  const [draftType, setDraftType] = useState<TypeFilter>(typeValue);
+  const [draftFrequency, setDraftFrequency] = useState<FrequencyFilter>(frequencyValue);
+
+  useEffect(() => {
+    if (!open) return;
+    setDraftStatus(statusValue);
+    setDraftType(typeValue);
+    setDraftFrequency(frequencyValue);
+  }, [open, statusValue, typeValue, frequencyValue]);
+
+  if (!open) return null;
+
+  const statusOptions: Array<{ key: StatusFilter; label: string }> = [
+    { key: "all", label: "All" },
+    { key: "active", label: "Active" },
+    { key: "paused", label: "Paused" },
+    { key: "completed", label: "Completed" },
+  ];
+  const typeOptions: Array<{ key: TypeFilter; label: string }> = [
+    { key: "all", label: "All Types" },
+    { key: "income", label: "Income" },
+    { key: "expense", label: "Expense" },
+    { key: "transfer", label: "Transfer" },
+  ];
+  const frequencyOptions: Array<{ key: FrequencyFilter; label: string }> = [
+    { key: "daily", label: "Daily" },
+    { key: "weekly", label: "Weekly" },
+    { key: "monthly", label: "Monthly" },
+    { key: "yearly", label: "Yearly" },
+  ];
+
+  const optionClass = (selected: boolean) => cn(
+    "flex min-h-11 items-center justify-between rounded-xl px-3 text-sm font-medium transition-colors",
+    selected ? "theme-selected" : "theme-hover bg-[var(--theme-card)] text-muted-foreground ring-1 ring-border"
+  );
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-end justify-center p-0 sm:items-center sm:p-4">
+      <div className="absolute inset-0 theme-overlay backdrop-blur-sm" onClick={onClose} />
+      <div className="theme-surface relative w-full rounded-t-2xl shadow-2xl ring-1 ring-border sm:max-w-md sm:rounded-2xl">
+        <div className="flex items-center justify-between border-b border-border px-5 py-4">
+          <h2 className="text-base font-semibold text-card-foreground">Filters</h2>
+          <button type="button" onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+            <X size={15} />
+          </button>
+        </div>
+
+        <div className="max-h-[70vh] overflow-y-auto px-5 py-5">
+          <div className="space-y-5">
+            <section className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Status</p>
+              <div className="grid gap-2">
+                {statusOptions.map((option) => (
+                  <button key={option.key} type="button" onClick={() => setDraftStatus(option.key)} className={optionClass(draftStatus === option.key)}>
+                    <span>{option.label}</span>
+                    <span className="rounded px-1.5 text-xs font-semibold tabular-nums opacity-75">{counts.status[option.key]}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Type</p>
+              <div className="grid grid-cols-2 gap-2">
+                {typeOptions.map((option) => (
+                  <button key={option.key} type="button" onClick={() => setDraftType(option.key)} className={optionClass(draftType === option.key)}>
+                    <span>{option.label}</span>
+                    <span className="rounded px-1.5 text-xs font-semibold tabular-nums opacity-75">{counts.type[option.key]}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Frequency</p>
+              <div className="grid grid-cols-2 gap-2">
+                {frequencyOptions.map((option) => (
+                  <button key={option.key} type="button" onClick={() => setDraftFrequency(option.key)} className={optionClass(draftFrequency === option.key)}>
+                    <span>{option.label}</span>
+                    <span className="rounded px-1.5 text-xs font-semibold tabular-nums opacity-75">{counts.frequency[option.key]}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <div className="flex gap-2 border-t border-border px-5 py-4">
+          <button
+            type="button"
+            onClick={() => {
+              onClear();
+              onClose();
+            }}
+            className="theme-hover flex-1 rounded-lg bg-[var(--theme-card)] px-4 py-2 text-sm font-semibold text-foreground ring-1 ring-border transition-colors"
+          >
+            Clear
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              onApply({ status: draftStatus, type: draftType, frequency: draftFrequency });
+              onClose();
+            }}
+            className="flex-1 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-zinc-950 transition-colors hover:bg-emerald-400"
+          >
+            Apply
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function RecurringView() {
   const { user, loading: authLoading, isLoggingOut, isGuest } = useAuth();
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [typeFilter,   setTypeFilter]   = useState<TypeFilter>("all");
+  const [frequencyFilter, setFrequencyFilter] = useState<FrequencyFilter>("all");
+  const [search,       setSearch]       = useState("");
+  const [filterOpen,   setFilterOpen]   = useState(false);
   const [modal,        setModal]        = useState<ModalState>({ mode: "closed" });
   const [deleteTarget, setDeleteTarget] = useState<AppRecurring | null>(null);
   const [deleting,     setDeleting]     = useState(false);
@@ -1184,16 +1330,49 @@ export function RecurringView() {
   const filtered = useMemo(() => {
     let result = recurring;
     if (statusFilter !== "all") result = result.filter((r) => r.status === statusFilter);
-    if (typeFilter !== "all")   result = result.filter((r) => r.type === typeFilter);
+    if (typeFilter !== "all")   result = result.filter((r) => typeFilter !== "transfer" && r.type === typeFilter);
+    if (frequencyFilter !== "all") result = result.filter((r) => r.frequency === frequencyFilter);
+    const query = search.trim().toLowerCase();
+    if (query) {
+      result = result.filter((r) => {
+        const categoryName = r.categoryId ? catMap.get(r.categoryId)?.name ?? "" : "";
+        const walletName = r.walletId ? walMap.get(r.walletId)?.name ?? "" : "";
+        return [
+          r.title,
+          r.type,
+          r.frequency,
+          r.status,
+          categoryName,
+          walletName,
+        ].some((value) => value.toLowerCase().includes(query));
+      });
+    }
     return result;
-  }, [recurring, statusFilter, typeFilter]);
+  }, [catMap, frequencyFilter, recurring, search, statusFilter, typeFilter, walMap]);
 
-  const counts = useMemo(() => ({
-    all:       recurring.length,
-    active:    recurring.filter((r) => r.status === "active").length,
-    paused:    recurring.filter((r) => r.status === "paused").length,
-    completed: recurring.filter((r) => r.status === "completed").length,
+  const counts = useMemo<RecurringFilterCounts>(() => ({
+    status: {
+      all: recurring.length,
+      active: recurring.filter((r) => r.status === "active").length,
+      paused: recurring.filter((r) => r.status === "paused").length,
+      completed: recurring.filter((r) => r.status === "completed").length,
+    },
+    type: {
+      all: recurring.length,
+      income: recurring.filter((r) => r.type === "income").length,
+      expense: recurring.filter((r) => r.type === "expense").length,
+      transfer: 0,
+    },
+    frequency: {
+      all: recurring.length,
+      daily: recurring.filter((r) => r.frequency === "daily").length,
+      weekly: recurring.filter((r) => r.frequency === "weekly").length,
+      monthly: recurring.filter((r) => r.frequency === "monthly").length,
+      yearly: recurring.filter((r) => r.frequency === "yearly").length,
+    },
   }), [recurring]);
+
+  const hasActiveFilters = statusFilter !== "all" || typeFilter !== "all" || frequencyFilter !== "all" || search.trim().length > 0;
 
   function handleRecurringSaved(updatedItem?: AppRecurring) {
     if (updatedItem) {
@@ -1277,7 +1456,7 @@ export function RecurringView() {
             <p className="text-sm text-zinc-500 mt-0.5">
               {loading
                 ? "Loading…"
-                : `${counts.active} active · ${counts.paused} paused${counts.completed > 0 ? ` · ${counts.completed} completed` : ""}`
+                : `${counts.status.active} active · ${counts.status.paused} paused${counts.status.completed > 0 ? ` · ${counts.status.completed} completed` : ""}`
               }
             </p>
           </div>
@@ -1313,8 +1492,35 @@ export function RecurringView() {
               <UpcomingCard items={upcomingWithOverdue} catMap={catMap} />
             )}
 
-            {/* filter bar */}
-            <div className="flex items-center gap-2 flex-wrap">
+            {/* mobile search and filters */}
+            <div className="flex items-center gap-2 md:hidden">
+              <div className="relative min-w-0 flex-1">
+                <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                <Input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search recurring..."
+                  className="h-9 border-zinc-700 bg-zinc-900 pl-9 pr-8 text-sm"
+                />
+                {search && (
+                  <button type="button" onClick={() => setSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300">
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setFilterOpen(true)}
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-zinc-900 text-zinc-500 ring-1 ring-zinc-800 transition-colors hover:bg-[var(--theme-primary-soft)] hover:text-[var(--theme-primary)]"
+                title="Filters"
+                aria-label="Open recurring filters"
+              >
+                <SlidersHorizontal size={15} />
+              </button>
+            </div>
+
+            {/* desktop filter bar */}
+            <div className="hidden items-center gap-2 flex-wrap md:flex">
               {/* status tabs */}
               <div className="flex items-center gap-0.5 p-1 bg-zinc-900 rounded-lg ring-1 ring-zinc-800">
                 {(
@@ -1340,7 +1546,7 @@ export function RecurringView() {
                   >
                     {label}
                     <span className={cn("text-[10px] font-semibold tabular-nums min-w-[16px] text-center rounded px-1", statusFilter === key ? "opacity-70" : "text-zinc-600")}>
-                      {counts[key]}
+                      {counts.status[key]}
                     </span>
                   </button>
                 ))}
@@ -1353,6 +1559,7 @@ export function RecurringView() {
                     { key: "all",     label: "All Types" },
                     { key: "income",  label: "Income"    },
                     { key: "expense", label: "Expense"   },
+                    { key: "transfer", label: "Transfer" },
                   ] as const
                 ).map(({ key, label }) => (
                   <button
@@ -1363,6 +1570,7 @@ export function RecurringView() {
                       typeFilter === key
                         ? key === "income"  ? "bg-emerald-500/15 text-emerald-300"
                         : key === "expense" ? "bg-rose-500/15 text-rose-300"
+                        : key === "transfer" ? "bg-sky-500/15 text-sky-300"
                         : "theme-selected"
                         : "text-zinc-400 hover:text-zinc-200"
                     )}
@@ -1381,7 +1589,7 @@ export function RecurringView() {
                 </div>
                 <div className="text-center">
                   <p className="text-sm font-semibold text-zinc-300">
-                    {statusFilter === "all" && typeFilter === "all"
+                    {!hasActiveFilters
                       ? "No recurring transactions"
                       : "No matching recurring transactions"}
                   </p>
@@ -1389,7 +1597,7 @@ export function RecurringView() {
                     Set up recurring transactions to automatically track repeating income or expenses.
                   </p>
                 </div>
-                {statusFilter === "all" && typeFilter === "all" && (
+                {!hasActiveFilters && (
                   <button
                     onClick={() => setModal({ mode: "add" })}
                     className="theme-hover flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[var(--theme-card)] font-medium text-sm transition-colors ring-1 ring-border"
@@ -1429,6 +1637,24 @@ export function RecurringView() {
         isOffline={isGuest}
         onClose={() => setModal({ mode: "closed" })}
         onSaved={handleRecurringSaved}
+      />
+      <RecurringFilterSheet
+        open={filterOpen}
+        statusValue={statusFilter}
+        typeValue={typeFilter}
+        frequencyValue={frequencyFilter}
+        counts={counts}
+        onApply={({ status, type, frequency }) => {
+          setStatusFilter(status);
+          setTypeFilter(type);
+          setFrequencyFilter(frequency);
+        }}
+        onClear={() => {
+          setStatusFilter("all");
+          setTypeFilter("all");
+          setFrequencyFilter("all");
+        }}
+        onClose={() => setFilterOpen(false)}
       />
       <DeleteConfirmModal
         item={deleteTarget}

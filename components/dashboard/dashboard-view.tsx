@@ -17,10 +17,8 @@ import {
   ArrowDownLeft,
   ArrowUpRight,
   Calendar,
-  CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  Clock3,
   Loader2,
   PiggyBank,
   Plus,
@@ -92,8 +90,6 @@ const EMPTY: {
   billSummary: {
     dueThisMonthCount: 0,
     dueThisMonthAmount: 0,
-    upcomingCount: 0,
-    upcomingAmount: 0,
     overdueCount: 0,
     overdueAmount: 0,
     paidThisMonthCount: 0,
@@ -199,8 +195,6 @@ type DashboardBill = {
 type DashboardBillSummary = {
   dueThisMonthCount: number;
   dueThisMonthAmount: number;
-  upcomingCount: number;
-  upcomingAmount: number;
   overdueCount: number;
   overdueAmount: number;
   paidThisMonthCount: number;
@@ -325,6 +319,17 @@ function todayIso() {
 
 function toIsoDate(date: Date) {
   return date.toISOString().split("T")[0];
+}
+
+function billsPageMonthBounds(date = new Date()) {
+  const start = new Date(date.getFullYear(), date.getMonth(), 1);
+  const end = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+  return { start: toIsoDate(start), end: toIsoDate(end) };
+}
+
+function isBillDueThisMonthLikeBillsPage(bill: Pick<SupabaseBill, "due_date" | "status">) {
+  const { start, end } = billsPageMonthBounds();
+  return bill.due_date >= start && bill.due_date <= end && bill.status !== "paid";
 }
 
 function nextMonthDate(iso: string) {
@@ -475,16 +480,15 @@ async function syncRecurringMonthlyBillsForDashboard(userId: string, month: stri
   return insertError?.message ?? "";
 }
 
-function summarizeBills(bills: SupabaseBill[], month: string): {
+function summarizeBills(bills: SupabaseBill[], _month: string): {
   summary: DashboardBillSummary;
   visibleBills: DashboardBill[];
 } {
-  const { start, end } = monthRange(month);
-  const today = todayIso();
-  const upcomingEndDate = new Date(today + "T00:00:00");
-  upcomingEndDate.setDate(upcomingEndDate.getDate() + 30);
-  const upcomingEnd = toIsoDate(upcomingEndDate);
-
+  const { start, end } = billsPageMonthBounds();
+  // Keep this amount in lockstep with Bills page "Due This Month":
+  // raw unpaid status + Bills page month bounds only. Do not replace with
+  // upcoming, remaining, next-30-days, or effective overdue totals.
+  const dueThisMonthRows = bills.filter(isBillDueThisMonthLikeBillsPage);
   const normalized = bills.map((bill) => ({
     id: bill.id,
     title: bill.title,
@@ -495,8 +499,8 @@ function summarizeBills(bills: SupabaseBill[], month: string): {
   }));
 
   const active = normalized.filter((bill) => bill.status !== "paid");
-  const dueThisMonth = active.filter((bill) => bill.dueDate >= start && bill.dueDate <= end);
-  const upcoming = active.filter((bill) => bill.dueDate >= today && bill.dueDate <= upcomingEnd);
+  const dueThisMonthIds = new Set(dueThisMonthRows.map((bill) => bill.id));
+  const dueThisMonth = normalized.filter((bill) => dueThisMonthIds.has(bill.id));
   const overdue = active.filter((bill) => bill.status === "overdue");
   const paidThisMonth = normalized.filter((bill) => bill.status === "paid" && bill.dueDate >= start && bill.dueDate <= end);
 
@@ -504,15 +508,13 @@ function summarizeBills(bills: SupabaseBill[], month: string): {
     summary: {
       dueThisMonthCount: dueThisMonth.length,
       dueThisMonthAmount: dueThisMonth.reduce((sum, bill) => sum + bill.amount, 0),
-      upcomingCount: upcoming.length,
-      upcomingAmount: upcoming.reduce((sum, bill) => sum + bill.amount, 0),
       overdueCount: overdue.length,
       overdueAmount: overdue.reduce((sum, bill) => sum + bill.amount, 0),
       paidThisMonthCount: paidThisMonth.length,
       paidThisMonthAmount: paidThisMonth.reduce((sum, bill) => sum + bill.amount, 0),
       remainingAmount: active.reduce((sum, bill) => sum + bill.amount, 0),
     },
-    visibleBills: [...overdue, ...upcoming]
+    visibleBills: [...overdue, ...dueThisMonth]
       .filter((bill, index, all) => all.findIndex((item) => item.id === bill.id) === index)
       .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
       .slice(0, 5),
@@ -600,7 +602,7 @@ function BillingSummaryCard({
 }: {
   label: string;
   value: string;
-  sub: string;
+  sub?: string;
   icon: typeof ReceiptText;
   tone: "sky" | "amber" | "rose" | "emerald" | "zinc";
   className?: string;
@@ -619,7 +621,7 @@ function BillingSummaryCard({
         <div className="min-w-0">
           <p className="truncate text-[11px] font-medium text-muted-foreground">{label}</p>
           <p className="mt-0.5 truncate text-xs font-bold tabular-nums text-card-foreground min-[380px]:text-sm sm:mt-1">{value}</p>
-          <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{sub}</p>
+          {sub && <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{sub}</p>}
         </div>
         <div className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-lg sm:h-8 sm:w-8", toneClass)}>
           <Icon size={14} strokeWidth={1.8} />
@@ -643,7 +645,7 @@ function DashboardBillsWidget({
       <div className="grid gap-2 px-3 sm:grid-cols-[1fr_auto] sm:px-4">
         <div>
           <h2 className="font-heading text-base font-medium leading-snug">Billing</h2>
-          <p className="text-sm text-muted-foreground">Upcoming bills and payment pressure</p>
+          <p className="text-sm text-muted-foreground">Unpaid bills due this month and overdue</p>
         </div>
         <Link
           href="/bills"
@@ -653,53 +655,29 @@ function DashboardBillsWidget({
         </Link>
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-2 px-3 sm:mt-4 sm:gap-3 sm:px-4 lg:grid-cols-5">
+      <div className="mt-3 grid grid-cols-2 gap-2 px-3 sm:mt-4 sm:gap-3 sm:px-4">
         <BillingSummaryCard
-          label="Due This Month"
+          label="Bills Due This Month"
           value={formatCurrency(summary.dueThisMonthAmount)}
-          sub={`${summary.dueThisMonthCount} bill${summary.dueThisMonthCount === 1 ? "" : "s"}`}
           icon={Calendar}
           tone="sky"
         />
         <BillingSummaryCard
-          label="Upcoming"
-          value={formatCurrency(summary.upcomingAmount)}
-          sub={`${summary.upcomingCount} next 30 days`}
-          icon={Clock3}
-          tone="amber"
-        />
-        <BillingSummaryCard
-          label="Overdue"
+          label="Overdue Bills"
           value={formatCurrency(summary.overdueAmount)}
-          sub={`${summary.overdueCount} overdue`}
           icon={AlertTriangle}
           tone="rose"
-        />
-        <BillingSummaryCard
-          label="Paid This Month"
-          value={formatCurrency(summary.paidThisMonthAmount)}
-          sub={`${summary.paidThisMonthCount} paid`}
-          icon={CheckCircle2}
-          tone="emerald"
-        />
-        <BillingSummaryCard
-          label="Remaining"
-          value={formatCurrency(summary.remainingAmount)}
-          sub="All unpaid bills"
-          icon={ReceiptText}
-          tone="zinc"
-          className="col-span-2 lg:col-span-1"
         />
       </div>
 
       <div className="mt-3 px-3 sm:mt-4 sm:px-4">
         <div className="mb-2 flex items-center justify-between">
-          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Upcoming Bills</p>
-          <p className="text-xs text-muted-foreground">Next 30 days first</p>
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Bills Due This Month</p>
+          <p className="text-xs text-muted-foreground">Overdue first</p>
         </div>
         {bills.length === 0 ? (
           <div className="dezu-card rounded-[1.15rem] bg-card/80 py-5 text-center text-sm text-muted-foreground">
-            No upcoming or overdue bills.
+            No bills due this month.
           </div>
         ) : (
           <div className="flex flex-col gap-1.5 lg:grid lg:grid-cols-5 lg:gap-2">
@@ -1100,13 +1078,13 @@ function CompactBillsWidget({ summary }: { summary: DashboardBillSummary }) {
       <div className="flex items-center justify-between gap-3">
         <div>
           <h2 className="font-heading text-base font-medium">Bills</h2>
-          <p className="text-sm text-muted-foreground">Upcoming and overdue</p>
+          <p className="text-sm text-muted-foreground">Due this month and overdue</p>
         </div>
         <Link href="/bills" className="theme-hover rounded-lg px-3 py-1.5 text-xs font-semibold ring-1 ring-border">View Bills</Link>
       </div>
       <div className="mt-3 grid grid-cols-2 gap-2">
-        <BillingSummaryCard label="Upcoming Bills" value={formatCurrency(summary.upcomingAmount)} sub={`${summary.upcomingCount} next 30 days`} icon={Clock3} tone="amber" />
-        <BillingSummaryCard label="Overdue Bills" value={formatCurrency(summary.overdueAmount)} sub={`${summary.overdueCount} overdue`} icon={AlertTriangle} tone="rose" />
+        <BillingSummaryCard label="Bills Due This Month" value={formatCurrency(summary.dueThisMonthAmount)} icon={Calendar} tone="sky" />
+        <BillingSummaryCard label="Overdue Bills" value={formatCurrency(summary.overdueAmount)} icon={AlertTriangle} tone="rose" />
       </div>
     </div>
   );
