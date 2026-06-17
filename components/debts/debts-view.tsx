@@ -9,7 +9,6 @@ import {
   Eye,
   HandCoins,
   Loader2,
-  MoreHorizontal,
   Pencil,
   Plus,
   Search,
@@ -17,14 +16,9 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { CurrencyInputPrefix } from "@/components/ui/currency-input-prefix";
+import { DetailRow, DetailRows } from "@/components/ui/details-modal";
 import { useAuth } from "@/context/auth-context";
 import { useCurrency } from "@/context/currency-context";
 import { cn } from "@/lib/utils";
@@ -664,7 +658,7 @@ function PaymentModal({
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center p-3 sm:p-4">
       <div className="absolute inset-0 theme-overlay backdrop-blur-sm" onClick={onClose} />
-      <div className="theme-surface relative w-full max-w-sm overflow-hidden rounded-2xl shadow-2xl ring-1 ring-border">
+      <div className="theme-surface relative flex max-h-[85dvh] w-full max-w-md flex-col overflow-hidden rounded-2xl shadow-2xl ring-1 ring-border">
         <div className="border-b border-border px-5 py-4">
           <h2 className="text-base font-semibold text-card-foreground">
             {debt.debt_type === "i_owe" ? "Add Payment" : "Add Collection"}
@@ -715,10 +709,18 @@ function PaymentModal({
 
 function DebtDetailsModal({
   debt,
+  wallet,
   onClose,
+  onEdit,
+  onDelete,
+  onPayment,
 }: {
   debt: SupabaseDebt;
+  wallet?: SupabaseWallet;
   onClose: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  onPayment: () => void;
 }) {
   const { formatCurrency } = useCurrency();
   const status = effectiveStatus(debt);
@@ -737,37 +739,34 @@ function DebtDetailsModal({
             <X size={15} />
           </button>
         </div>
-        <div className="space-y-3 px-5 py-5 text-sm">
-          <div className="grid grid-cols-2 gap-2">
-            <div className="rounded-xl bg-muted/60 p-3">
-              <p className="text-[11px] text-muted-foreground">Remaining</p>
-              <p className="mt-1 font-bold tabular-nums text-card-foreground">{formatCurrency(debt.remaining_balance)}</p>
-            </div>
-            <div className="rounded-xl bg-muted/60 p-3">
-              <p className="text-[11px] text-muted-foreground">Original</p>
-              <p className="mt-1 font-bold tabular-nums text-card-foreground">{formatCurrency(debt.original_amount)}</p>
-            </div>
-          </div>
-          <div className="flex items-center justify-between gap-3 rounded-xl bg-muted/60 px-3 py-2.5">
-            <span className="text-muted-foreground">Status</span>
-            <DebtStatusBadge status={status} />
-          </div>
-          <div className="grid gap-2 text-xs text-muted-foreground">
-            <div className="flex justify-between gap-3">
-              <span>Started</span>
-              <span className="text-card-foreground">{formatDate(debt.borrowed_date)}</span>
-            </div>
-            <div className="flex justify-between gap-3">
-              <span>Due</span>
-              <span className="text-card-foreground">{formatDate(debt.due_date)}</span>
-            </div>
-          </div>
-          {debt.notes && (
-            <div className="rounded-xl bg-muted/60 p-3">
-              <p className="text-[11px] text-muted-foreground">Notes</p>
-              <p className="mt-1 text-sm leading-relaxed text-card-foreground">{debt.notes}</p>
-            </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-sm">
+          <DetailRows>
+            <DetailRow label="Person" value={debt.person_name} />
+            <DetailRow label="Type" value={isOwe ? "I Owe" : "Owes Me"} />
+            <DetailRow label="Original" value={formatCurrency(debt.original_amount)} accent="font-bold tabular-nums" />
+            <DetailRow label="Remaining" value={formatCurrency(debt.remaining_balance)} accent="font-bold tabular-nums" />
+            <DetailRow label="Status" value={STATUS_CONFIG[status].label} />
+            <DetailRow label="Due Date" value={formatDate(debt.due_date)} />
+            <DetailRow label="Wallet" value={wallet?.name ?? "No wallet"} />
+            <DetailRow label="Notes" value={debt.notes?.trim() || "No notes added"} multiline />
+            <DetailRow label="Payments" value="Open transaction history to review linked debt payments." multiline />
+          </DetailRows>
+        </div>
+        <div className="flex shrink-0 flex-col gap-2 border-t border-border px-5 py-4 sm:flex-row sm:justify-end">
+          {status !== "paid" && (
+            <button type="button" onClick={onPayment} className="flex items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90">
+              <HandCoins size={14} />
+              {isOwe ? "Add Payment" : "Add Collection"}
+            </button>
           )}
+          <button type="button" onClick={onEdit} className="flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-[var(--theme-primary-soft)] hover:text-[var(--theme-primary)]">
+            <Pencil size={14} />
+            Edit Debt
+          </button>
+          <button type="button" onClick={onDelete} className="flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold text-rose-400 transition-colors hover:bg-rose-500/10">
+            <Trash2 size={14} />
+            Delete Debt
+          </button>
         </div>
       </div>
     </div>
@@ -850,28 +849,29 @@ function DebtRow({
     : 0;
 
   return (
-    <div className="dezu-card rounded-[1.15rem] bg-card/90 p-3 md:p-4">
+    <div role="button" tabIndex={0} onClick={onViewDetails} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onViewDetails(); }} className="dezu-card rounded-xl bg-card/90 p-3 transition-colors hover:ring-1 hover:ring-[var(--theme-primary)]/30 md:rounded-[1.15rem] md:p-4">
       <div className="flex gap-2.5 md:gap-3">
-        <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-xl md:h-10 md:w-10", isOwe ? "bg-rose-500/10 text-rose-400" : "bg-emerald-500/10 text-emerald-400")}>
+        <div className={cn("hidden h-9 w-9 shrink-0 items-center justify-center rounded-xl md:flex md:h-10 md:w-10", isOwe ? "bg-rose-500/10 text-rose-400" : "bg-emerald-500/10 text-emerald-400")}>
           <Icon size={17} strokeWidth={1.8} />
         </div>
 
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-1.5">
             <h3 className="truncate text-sm font-semibold text-card-foreground">{debt.person_name}</h3>
-            <span className={cn("rounded-full px-2 py-1 text-[10px] font-semibold leading-none", isOwe ? "bg-rose-500/10 text-rose-300" : "bg-emerald-500/10 text-emerald-300")}>
+            <span className={cn("hidden rounded-full px-2 py-1 text-[10px] font-semibold leading-none md:inline-flex", isOwe ? "bg-rose-500/10 text-rose-300" : "bg-emerald-500/10 text-emerald-300")}>
               {isOwe ? "I Owe" : "Owes Me"}
             </span>
-            <DebtStatusBadge status={status} />
+            <span className="hidden md:inline-flex"><DebtStatusBadge status={status} /></span>
           </div>
-          <div className="mt-1 flex items-baseline gap-x-2">
-            <p className="truncate text-base font-bold tabular-nums text-card-foreground md:text-lg">{formatCurrency(debt.remaining_balance)}</p>
-            <p className="text-xs text-muted-foreground">of {formatCurrency(debt.original_amount)}</p>
+          <div className="mt-1 flex items-baseline gap-x-1.5">
+            <p className="truncate text-sm font-bold tabular-nums text-card-foreground md:text-lg">{formatCurrency(debt.remaining_balance)}</p>
+            <p className="text-xs text-muted-foreground md:hidden">Remaining · {STATUS_CONFIG[status].label}</p>
+            <p className="hidden text-xs text-muted-foreground md:block">of {formatCurrency(debt.original_amount)}</p>
           </div>
-          <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-muted md:mt-2 md:h-1.5">
+          <div className="mt-1.5 hidden h-1 overflow-hidden rounded-full bg-muted md:mt-2 md:block md:h-1.5">
             <div className="h-full rounded-full bg-primary" style={{ width: `${progress}%` }} />
           </div>
-          <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground md:mt-2 md:gap-x-3 md:text-xs">
+          <div className="mt-1.5 hidden flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground md:mt-2 md:flex md:gap-x-3 md:text-xs">
             <span className="hidden min-[380px]:inline">Started {formatDate(debt.borrowed_date)}</span>
             <span className={cn(status === "overdue" ? "text-rose-300" : "")}>{dueLabel(debt)}</span>
             {debt.notes && <span className="truncate md:max-w-[260px]">{debt.notes}</span>}
@@ -881,65 +881,28 @@ function DebtRow({
         <div className="hidden shrink-0 flex-wrap items-center gap-2 md:flex md:justify-end">
           {status !== "paid" && (
             <>
-              <button type="button" onClick={onPayment} className="flex min-h-9 items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90">
+              <button type="button" onClick={(event) => { event.stopPropagation(); onPayment(); }} className="flex min-h-9 items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90">
                 <HandCoins size={13} />
                 {isOwe ? "Payment" : "Collection"}
               </button>
-              <button type="button" onClick={onPaid} disabled={paying} className="theme-hover flex min-h-9 items-center gap-1.5 rounded-lg bg-[var(--theme-card)] px-3 py-2 text-xs font-medium text-muted-foreground ring-1 ring-border transition-colors disabled:pointer-events-none disabled:opacity-60">
+              <button type="button" onClick={(event) => { event.stopPropagation(); onPaid(); }} disabled={paying} className="theme-hover flex min-h-9 items-center gap-1.5 rounded-lg bg-[var(--theme-card)] px-3 py-2 text-xs font-medium text-muted-foreground ring-1 ring-border transition-colors disabled:pointer-events-none disabled:opacity-60">
                 {paying ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
                 Paid
               </button>
             </>
           )}
-          <button type="button" onClick={onViewDetails} className="theme-hover flex min-h-9 items-center gap-1.5 rounded-lg bg-[var(--theme-card)] px-3 py-2 text-xs font-medium text-muted-foreground ring-1 ring-border transition-colors">
+          <button type="button" onClick={(event) => { event.stopPropagation(); onViewDetails(); }} className="theme-hover flex min-h-9 items-center gap-1.5 rounded-lg bg-[var(--theme-card)] px-3 py-2 text-xs font-medium text-muted-foreground ring-1 ring-border transition-colors">
             <Eye size={13} />
             Details
           </button>
-          <button type="button" onClick={onEdit} className="theme-hover flex min-h-9 items-center gap-1.5 rounded-lg bg-[var(--theme-card)] px-3 py-2 text-xs font-medium text-muted-foreground ring-1 ring-border transition-colors">
+          <button type="button" onClick={(event) => { event.stopPropagation(); onEdit(); }} className="theme-hover flex min-h-9 items-center gap-1.5 rounded-lg bg-[var(--theme-card)] px-3 py-2 text-xs font-medium text-muted-foreground ring-1 ring-border transition-colors">
             <Pencil size={13} />
             Edit
           </button>
-          <button type="button" onClick={onDelete} className="flex min-h-9 items-center justify-center rounded-lg px-3 py-2 text-rose-300 transition-colors hover:bg-rose-500/10">
+          <button type="button" onClick={(event) => { event.stopPropagation(); onDelete(); }} className="flex min-h-9 items-center justify-center rounded-lg px-3 py-2 text-rose-300 transition-colors hover:bg-rose-500/10">
             <Trash2 size={14} />
           </button>
         </div>
-      </div>
-
-      <div className="mt-2 flex items-center gap-2 md:hidden">
-        {status !== "paid" && (
-          <>
-            <button type="button" onClick={onPayment} className="flex min-h-9 flex-1 items-center justify-center gap-1.5 rounded-lg bg-primary px-2.5 py-2 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90">
-              <HandCoins size={13} />
-              {isOwe ? "Payment" : "Collection"}
-            </button>
-            <button type="button" onClick={onPaid} disabled={paying} className="theme-hover flex min-h-9 flex-1 items-center justify-center gap-1.5 rounded-lg bg-[var(--theme-card)] px-2.5 py-2 text-xs font-medium text-muted-foreground ring-1 ring-border transition-colors disabled:pointer-events-none disabled:opacity-60">
-              {paying ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
-              Paid
-            </button>
-          </>
-        )}
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            aria-label="Debt actions"
-            className="theme-hover flex min-h-9 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--theme-card)] text-muted-foreground ring-1 ring-border transition-colors"
-          >
-            <MoreHorizontal size={16} />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" side="bottom" className="w-44">
-            <DropdownMenuItem onClick={onViewDetails} className="flex cursor-pointer items-center gap-2">
-              <Eye size={14} />
-              View Details
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={onEdit} className="flex cursor-pointer items-center gap-2">
-              <Pencil size={14} />
-              Edit Debt
-            </DropdownMenuItem>
-            <DropdownMenuItem variant="destructive" onClick={onDelete} className="flex cursor-pointer items-center gap-2">
-              <Trash2 size={14} />
-              Delete Debt
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
       </div>
     </div>
   );
@@ -1305,7 +1268,20 @@ export function DebtsView() {
       {detailTarget && (
         <DebtDetailsModal
           debt={detailTarget}
+          wallet={detailTarget.wallet_id ? wallets.find((wallet) => wallet.id === detailTarget.wallet_id) : undefined}
           onClose={() => setDetailTarget(null)}
+          onEdit={() => {
+            setModal({ mode: "edit", debt: detailTarget });
+            setDetailTarget(null);
+          }}
+          onDelete={() => {
+            setDeleteTarget(detailTarget);
+            setDetailTarget(null);
+          }}
+          onPayment={() => {
+            setPaymentTarget(detailTarget);
+            setDetailTarget(null);
+          }}
         />
       )}
 

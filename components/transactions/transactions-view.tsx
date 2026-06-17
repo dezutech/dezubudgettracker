@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { CurrencyInputPrefix } from "@/components/ui/currency-input-prefix";
+import { DetailRow, DetailRows, DetailsModalShell } from "@/components/ui/details-modal";
 import { ReceiptAttachment } from "@/components/ui/receipt-attachment";
 import { createClient } from "@/lib/supabase/client";
 import { ensureSupabaseDefaultCategories } from "@/lib/supabase/categories";
@@ -968,23 +969,6 @@ function SummaryCard({
 
 // ─── TransactionRow ───────────────────────────────────────────────────────────
 
-function DetailItem({
-  label,
-  value,
-  className,
-}: {
-  label: string;
-  value: string;
-  className?: string;
-}) {
-  return (
-    <div className={cn("min-w-0 rounded-xl bg-zinc-800/60 px-3 py-2.5", className)}>
-      <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">{label}</p>
-      <p className="mt-1 break-words text-sm font-medium text-zinc-100">{value}</p>
-    </div>
-  );
-}
-
 function TransactionDetailsModal({
   tx,
   raw,
@@ -1004,70 +988,28 @@ function TransactionDetailsModal({
   if (!tx || !raw) return null;
 
   const isIncome = tx.type === "income";
-  const isExpense = tx.type === "expense";
   const createdAt = formatTimestamp(raw.created_at);
   const updatedAt = formatTimestamp(raw.updated_at);
   const notes = (raw.notes ?? tx.notes ?? "").trim();
   const walletLabel = tx.type === "transfer" && destinationWalletName
     ? `${tx.walletName} to ${destinationWalletName}`
     : tx.walletName;
+  const amountText = `${tx.type === "transfer" ? "" : isIncome ? "+" : "-"}${formatCurrency(tx.amount)}`;
+  const amountColor = isIncome ? "text-emerald-400" : tx.type === "transfer" ? "text-sky-400" : "text-rose-300";
+  const timeValue = formatDetailTime(raw.transaction_date);
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-end justify-center p-0 sm:items-center sm:p-4">
-      <div className="absolute inset-0 theme-overlay backdrop-blur-sm" onClick={onClose} />
-      <div className="dezu-modal-panel relative w-full bg-zinc-900 shadow-2xl ring-1 ring-white/10 sm:max-w-lg sm:rounded-2xl">
-        <div className="dezu-modal-header flex items-start justify-between gap-4 border-b border-zinc-800 px-5 py-4">
-          <div className="min-w-0">
-            <p className="text-xs font-medium text-zinc-500">Transaction Details</p>
-            <h2 className="mt-1 truncate text-lg font-semibold text-zinc-50">{tx.name}</h2>
-          </div>
-          <button onClick={onClose} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-[var(--theme-primary-soft)] hover:text-[var(--theme-primary)]">
-            <X size={16} />
-          </button>
-        </div>
-
-        <div className="dezu-modal-body max-h-[70dvh] overflow-y-auto px-5 py-5">
-          <div className="mb-4 flex items-center justify-between gap-3 rounded-xl bg-zinc-800/60 px-3 py-3">
-            <div>
-              <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">Amount</p>
-              <p className={cn("mt-1 text-xl font-bold tabular-nums", isIncome ? "text-emerald-400" : tx.type === "transfer" ? "text-sky-400" : "text-zinc-50")}>
-                {tx.type === "transfer" ? "" : isIncome ? "+" : "-"}{formatCurrency(tx.amount)}
-              </p>
-            </div>
-            <span className={cn(
-              "rounded-lg px-2.5 py-1 text-xs font-semibold",
-              isIncome ? "bg-emerald-500/10 text-emerald-300" : isExpense ? "bg-rose-500/10 text-rose-300" : "bg-sky-500/10 text-sky-300"
-            )}>
-              {formatTypeLabel(tx.type)}
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            <DetailItem label="Wallet" value={walletLabel} />
-            <DetailItem label="Category" value={tx.categoryName} />
-            <DetailItem label="Date" value={formatDetailDate(raw.transaction_date)} />
-            <DetailItem label="Time" value={formatDetailTime(raw.transaction_date)} />
-            {createdAt && <DetailItem label="Created at" value={createdAt} />}
-            {updatedAt && <DetailItem label="Updated at" value={updatedAt} />}
-          </div>
-
-          <div className="mt-2 rounded-xl bg-zinc-800/60 px-3 py-3">
-            <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">Notes</p>
-            <p className={cn("mt-1 whitespace-pre-wrap break-words text-sm", notes ? "text-zinc-100" : "text-zinc-500")}>
-              {notes || "No notes added"}
-            </p>
-          </div>
-
-          <div className="mt-2">
-            <ReceiptAttachment value={raw} draft={{ file: null, remove: false }} onDraftChange={() => {}} readOnly />
-          </div>
-        </div>
-
-        <div className="dezu-modal-footer flex flex-col gap-2 border-t border-zinc-800 px-5 py-4 sm:flex-row sm:items-center sm:justify-end">
+    <DetailsModalShell
+      open={Boolean(tx && raw)}
+      eyebrow="Transaction Details"
+      title={tx.name}
+      onClose={onClose}
+      footer={
+        <>
           <button
             onClick={onEdit}
             disabled={tx.type === "transfer"}
-            className="flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium text-zinc-300 transition-colors hover:bg-[var(--theme-primary-soft)] hover:text-[var(--theme-primary)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-zinc-300"
+            className="flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-[var(--theme-primary-soft)] hover:text-[var(--theme-primary)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
           >
             <Pencil size={14} />
             Edit Transaction
@@ -1081,13 +1023,30 @@ function TransactionDetailsModal({
           </button>
           <button
             onClick={onClose}
-            className="rounded-lg px-4 py-2 text-sm font-medium text-zinc-400 transition-colors hover:bg-[var(--theme-primary-soft)] hover:text-[var(--theme-primary)]"
+            className="rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-[var(--theme-primary-soft)] hover:text-[var(--theme-primary)]"
           >
             Close
           </button>
+        </>
+      }
+    >
+      <DetailRows>
+        <DetailRow label="Amount" value={amountText} accent={cn("font-bold tabular-nums", amountColor)} />
+        <DetailRow label="Type" value={formatTypeLabel(tx.type)} />
+        <DetailRow label="Wallet" value={walletLabel} />
+        <DetailRow label="Category" value={tx.categoryName} />
+        <DetailRow label="Date" value={formatDetailDate(raw.transaction_date)} />
+        {timeValue && timeValue !== "No time recorded" && <DetailRow label="Time" value={timeValue} />}
+        {createdAt && <DetailRow label="Created" value={createdAt} />}
+        {updatedAt && updatedAt !== createdAt && <DetailRow label="Updated" value={updatedAt} />}
+        <DetailRow label="Notes" value={notes || "No notes added"} multiline />
+      </DetailRows>
+      {raw.receipt_url && (
+        <div className="mt-3">
+          <ReceiptAttachment value={raw} draft={{ file: null, remove: false }} onDraftChange={() => {}} readOnly compact />
         </div>
-      </div>
-    </div>
+      )}
+    </DetailsModalShell>
   );
 }
 

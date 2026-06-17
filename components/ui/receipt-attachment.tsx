@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ExternalLink, FileText, Paperclip, Trash2, Upload, X } from "lucide-react";
+import { Eye, FileText, Paperclip, Trash2, Upload, X } from "lucide-react";
+import { FilePreviewModal } from "@/components/ui/file-preview-modal";
 import { cn } from "@/lib/utils";
 import {
   EMPTY_RECEIPT,
@@ -31,6 +32,7 @@ export function ReceiptAttachment({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [error, setError] = useState("");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const receipt = getReceiptMetadata(value);
   const hasExisting = Boolean(receipt.receipt_url && !draft.remove);
   const hasDraft = Boolean(draft.file);
@@ -113,24 +115,24 @@ export function ReceiptAttachment({
       {hasReceipt && (
         <div className="mt-3 flex items-center gap-3">
           {isReceiptImage(display.receipt_mime_type) ? (
-            <button type="button" onClick={() => window.open(display.receipt_url ?? "", "_blank", "noopener,noreferrer")} className="h-14 w-14 overflow-hidden rounded-lg bg-[var(--theme-card)] ring-1 ring-border">
+            <button type="button" onClick={() => setPreviewOpen(true)} className="h-14 w-14 overflow-hidden rounded-lg bg-[var(--theme-card)] ring-1 ring-border">
               <img src={display.receipt_url ?? ""} alt={display.receipt_file_name ?? "Receipt"} className="h-full w-full object-cover" />
             </button>
           ) : (
-            <div className="theme-selected-soft flex h-14 w-14 items-center justify-center rounded-lg ring-1">
+            <button type="button" onClick={() => setPreviewOpen(true)} className="theme-selected-soft flex h-14 w-14 items-center justify-center rounded-lg ring-1">
               <FileText size={22} />
-            </div>
+            </button>
           )}
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium text-card-foreground">{display.receipt_file_name ?? "Receipt"}</p>
             <p className="text-xs text-muted-foreground">{display.receipt_mime_type ?? "File"} {formatReceiptSize(display.receipt_size) && `- ${formatReceiptSize(display.receipt_size)}`}</p>
             <button
               type="button"
-              onClick={() => window.open(display.receipt_url ?? "", "_blank", "noopener,noreferrer")}
+              onClick={() => setPreviewOpen(true)}
               className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-[var(--theme-primary)] hover:underline"
             >
-              <ExternalLink size={11} />
-              Open preview
+              <Eye size={11} />
+              View receipt
             </button>
           </div>
           {!readOnly && (
@@ -142,6 +144,14 @@ export function ReceiptAttachment({
       )}
 
       {error && <p className="mt-2 rounded-lg bg-rose-500/10 px-2.5 py-1.5 text-xs text-rose-300">{error}</p>}
+      <FilePreviewModal
+        open={previewOpen}
+        url={display.receipt_url}
+        fileName={display.receipt_file_name}
+        mimeType={display.receipt_mime_type}
+        title="Receipt Preview"
+        onClose={() => setPreviewOpen(false)}
+      />
     </div>
   );
 }

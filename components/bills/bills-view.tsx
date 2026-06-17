@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { CurrencyInputPrefix } from "@/components/ui/currency-input-prefix";
+import { DetailRow, DetailRows, DetailsModalShell } from "@/components/ui/details-modal";
 import { ReceiptAttachment } from "@/components/ui/receipt-attachment";
 import { useAuth } from "@/context/auth-context";
 import { useCurrency } from "@/context/currency-context";
@@ -619,27 +620,31 @@ function BillRow({
 }) {
   const status = effectiveStatus(bill);
   const dueSoon = bill.status !== "paid" && daysUntil(bill.due_date) >= 0 && daysUntil(bill.due_date) <= 3;
+  const statusLabel = STATUS_CONFIG[status].label;
 
   return (
-    <div role="button" tabIndex={0} onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onOpen(); }} className="dezu-card rounded-[1.15rem] bg-card/90 p-4 transition-colors hover:ring-1 hover:ring-[var(--theme-primary)]/30">
+    <div role="button" tabIndex={0} onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onOpen(); }} className="dezu-card rounded-xl bg-card/90 p-3 transition-colors hover:ring-1 hover:ring-[var(--theme-primary)]/30 sm:rounded-[1.15rem] sm:p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-400">
+        <div className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-400 sm:flex">
           <ReceiptText size={18} strokeWidth={1.8} />
         </div>
 
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="truncate text-sm font-semibold text-zinc-100">{bill.title}</h3>
-            <StatusBadge status={status} />
+            <span className="hidden sm:inline-flex"><StatusBadge status={status} /></span>
             {bill.is_recurring && (
-              <span className="rounded-full bg-violet-500/10 px-2 py-1 text-[10px] font-semibold leading-none text-violet-300">Recurring</span>
+              <span className="hidden rounded-full bg-violet-500/10 px-2 py-1 text-[10px] font-semibold leading-none text-violet-300 sm:inline-flex">Recurring</span>
             )}
             {dueSoon && (
-              <span className="rounded-full bg-amber-500/10 px-2 py-1 text-[10px] font-semibold leading-none text-amber-300">Due soon</span>
+              <span className="hidden rounded-full bg-amber-500/10 px-2 py-1 text-[10px] font-semibold leading-none text-amber-300 sm:inline-flex">Due soon</span>
             )}
           </div>
-          <p className="mt-1 text-lg font-bold tabular-nums text-zinc-50">{formatCurrency(bill.amount)}</p>
-          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500">
+          <p className="mt-1 text-sm font-bold tabular-nums text-zinc-50 sm:text-lg">
+            {formatCurrency(bill.amount)}
+            <span className={cn("font-medium", status === "overdue" ? "text-rose-300" : status === "paid" ? "text-emerald-300" : "text-zinc-500")}> · {statusLabel}</span>
+          </p>
+          <div className="mt-2 hidden flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500 sm:flex">
             <span className={cn("flex items-center gap-1", status === "overdue" ? "text-rose-300" : dueSoon ? "text-amber-300" : "")}>
               <Calendar size={12} />
               {dueLabel(bill)}
@@ -652,13 +657,13 @@ function BillRow({
             {bill.notes && <span className="truncate sm:max-w-[220px]">{bill.notes}</span>}
           </div>
           {bill.receipt_url && (
-            <div className="mt-3 max-w-sm">
+            <div className="mt-3 hidden max-w-sm sm:block">
               <ReceiptAttachment value={bill} draft={{ file: null, remove: false }} onDraftChange={() => {}} readOnly compact />
             </div>
           )}
         </div>
 
-        <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+        <div className="hidden shrink-0 flex-wrap items-center gap-2 sm:flex sm:justify-end">
           {bill.status !== "paid" && (
             <button onClick={(event) => { event.stopPropagation(); onPaid(); }} disabled={paying} className="flex min-h-9 items-center gap-1.5 rounded-lg bg-emerald-500 px-3 py-2 text-xs font-semibold text-zinc-950 transition-colors hover:bg-emerald-400 disabled:pointer-events-none disabled:opacity-60">
               {paying ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
@@ -737,6 +742,8 @@ function BillDetailsModal({
   onClose,
   onEdit,
   onDelete,
+  onPaid,
+  paying,
 }: {
   bill: SupabaseBill | null;
   category?: SupabaseCategory;
@@ -744,6 +751,8 @@ function BillDetailsModal({
   onClose: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  onPaid: () => void;
+  paying: boolean;
 }) {
   const { formatCurrency } = useCurrency();
   if (!bill) return null;
@@ -751,56 +760,20 @@ function BillDetailsModal({
   const notes = (bill.notes ?? "").trim();
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-end justify-center p-0 sm:items-center sm:p-4">
-      <div className="absolute inset-0 theme-overlay backdrop-blur-sm" onClick={onClose} />
-      <div className="dezu-modal-panel relative w-full bg-zinc-900 shadow-2xl ring-1 ring-white/10 sm:max-w-lg sm:rounded-2xl">
-        <div className="dezu-modal-header flex items-start justify-between gap-4 border-b border-zinc-800 px-5 py-4">
-          <div className="min-w-0">
-            <p className="text-xs font-medium text-zinc-500">Bill Details</p>
-            <h2 className="mt-1 truncate text-lg font-semibold text-zinc-50">{bill.title}</h2>
-          </div>
-          <button onClick={onClose} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-[var(--theme-primary-soft)] hover:text-[var(--theme-primary)]">
-            <X size={16} />
-          </button>
-        </div>
-        <div className="dezu-modal-body max-h-[70dvh] overflow-y-auto px-5 py-5">
-          <div className="mb-4 flex items-center justify-between gap-3 rounded-xl bg-zinc-800/60 px-3 py-3">
-            <div>
-              <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">Amount</p>
-              <p className="mt-1 text-xl font-bold tabular-nums text-zinc-50">{formatCurrency(bill.amount)}</p>
-            </div>
-            <StatusBadge status={status} />
-          </div>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            <div className="rounded-xl bg-zinc-800/60 px-3 py-2.5">
-              <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">Due Date</p>
-              <p className="mt-1 text-sm font-medium text-zinc-100">{formatDate(bill.due_date)}</p>
-            </div>
-            <div className="rounded-xl bg-zinc-800/60 px-3 py-2.5">
-              <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">Wallet</p>
-              <p className="mt-1 text-sm font-medium text-zinc-100">{wallet?.name ?? "No wallet"}</p>
-            </div>
-            <div className="rounded-xl bg-zinc-800/60 px-3 py-2.5">
-              <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">Category</p>
-              <p className="mt-1 text-sm font-medium text-zinc-100">{category?.name ?? "No category"}</p>
-            </div>
-            <div className="rounded-xl bg-zinc-800/60 px-3 py-2.5">
-              <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">Type</p>
-              <p className="mt-1 text-sm font-medium text-zinc-100">{bill.is_recurring ? "Recurring bill" : "Bill"}</p>
-            </div>
-          </div>
-          <div className="mt-2 rounded-xl bg-zinc-800/60 px-3 py-3">
-            <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">Notes</p>
-            <p className={cn("mt-1 whitespace-pre-wrap break-words text-sm", notes ? "text-zinc-100" : "text-zinc-500")}>
-              {notes || "No notes added"}
-            </p>
-          </div>
-          <div className="mt-2">
-            <ReceiptAttachment value={bill} draft={{ file: null, remove: false }} onDraftChange={() => {}} readOnly />
-          </div>
-        </div>
-        <div className="dezu-modal-footer flex flex-col gap-2 border-t border-zinc-800 px-5 py-4 sm:flex-row sm:items-center sm:justify-end">
-          <button onClick={onEdit} className="flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium text-zinc-300 transition-colors hover:bg-[var(--theme-primary-soft)] hover:text-[var(--theme-primary)]">
+    <DetailsModalShell
+      open={Boolean(bill)}
+      eyebrow="Bill Details"
+      title={bill.title}
+      onClose={onClose}
+      footer={
+        <>
+          {bill.status !== "paid" && (
+            <button onClick={onPaid} disabled={paying} className="flex items-center justify-center gap-1.5 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-zinc-950 transition-colors hover:bg-emerald-400 disabled:pointer-events-none disabled:opacity-60">
+              {paying ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+              Mark Paid
+            </button>
+          )}
+          <button onClick={onEdit} className="flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-[var(--theme-primary-soft)] hover:text-[var(--theme-primary)]">
             <Pencil size={14} />
             Edit Bill
           </button>
@@ -808,12 +781,27 @@ function BillDetailsModal({
             <Trash2 size={14} />
             Delete Bill
           </button>
-          <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm font-medium text-zinc-400 transition-colors hover:bg-[var(--theme-primary-soft)] hover:text-[var(--theme-primary)]">
+          <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-[var(--theme-primary-soft)] hover:text-[var(--theme-primary)]">
             Close
           </button>
+        </>
+      }
+    >
+      <DetailRows>
+        <DetailRow label="Amount" value={formatCurrency(bill.amount)} accent="font-bold tabular-nums" />
+        <DetailRow label="Status" value={STATUS_CONFIG[status].label} />
+        <DetailRow label="Due Date" value={formatDate(bill.due_date)} />
+        <DetailRow label="Wallet" value={wallet?.name ?? "No wallet"} />
+        <DetailRow label="Category" value={category?.name ?? "No category"} />
+        <DetailRow label="Type" value={bill.is_recurring ? "Recurring bill" : "Bill"} />
+        <DetailRow label="Notes" value={notes || "No notes added"} multiline />
+      </DetailRows>
+      {bill.receipt_url && (
+        <div className="mt-3">
+          <ReceiptAttachment value={bill} draft={{ file: null, remove: false }} onDraftChange={() => {}} readOnly compact />
         </div>
-      </div>
-    </div>
+      )}
+    </DetailsModalShell>
   );
 }
 
@@ -1316,6 +1304,12 @@ export function BillsView() {
           setDeleteTarget(detailsTarget);
           setDetailsTarget(null);
         }}
+        onPaid={() => {
+          if (!detailsTarget) return;
+          setPayTarget(detailsTarget);
+          setDetailsTarget(null);
+        }}
+        paying={payingId === detailsTarget?.id}
       />
 
       <MarkPaidModal

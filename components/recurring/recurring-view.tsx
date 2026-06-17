@@ -23,6 +23,7 @@ import { loggedSupabase, settledError } from "@/lib/supabase/query";
 import { useAuth } from "@/context/auth-context";
 import { useCurrency } from "@/context/currency-context";
 import { CurrencyInputPrefix } from "@/components/ui/currency-input-prefix";
+import { DetailRow, DetailRows, DetailsModalShell } from "@/components/ui/details-modal";
 import { Input } from "@/components/ui/input";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -337,6 +338,14 @@ function getPaymentInfo(item: AppRecurring, linkedBill?: LinkedGeneratedBill): P
   };
 }
 
+function recurringPaymentTextClass(payment: PaymentInfo) {
+  if (payment.statusClass.includes("text-emerald")) return "text-emerald-300";
+  if (payment.statusClass.includes("text-rose")) return "text-rose-300";
+  if (payment.statusClass.includes("text-amber")) return "text-amber-300";
+  if (payment.statusClass.includes("text-sky")) return "text-sky-300";
+  return "text-zinc-500";
+}
+
 // ─── ProgressBadge ────────────────────────────────────────────────────────────
 
 function ProgressBadge({ item }: { item: AppRecurring }) {
@@ -514,6 +523,7 @@ function RecurringCard({
   linkedBill,
   catMap,
   walMap,
+  onOpen,
   onEdit,
   onDelete,
   onPause,
@@ -524,6 +534,7 @@ function RecurringCard({
   linkedBill?: LinkedGeneratedBill;
   catMap: Map<string, SupabaseCategory>;
   walMap: Map<string, SupabaseWallet>;
+  onOpen: () => void;
   onEdit: () => void;
   onDelete: () => void;
   onPause: () => void;
@@ -542,48 +553,51 @@ function RecurringCard({
   const isActive    = item.status === "active";
 
   return (
-    <div className={cn(
-      "dezu-card flex flex-col gap-3 rounded-[1.15rem] bg-card/90 p-4 transition-all group",
+    <div role="button" tabIndex={0} onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onOpen(); }} className={cn(
+      "dezu-card group flex flex-col gap-2 rounded-xl bg-card/90 p-3 transition-all hover:ring-1 hover:ring-[var(--theme-primary)]/30 sm:gap-3 sm:rounded-[1.15rem] sm:p-4",
       isCompleted ? "ring-zinc-800/40 opacity-50" :
       !isActive   ? "ring-zinc-800/50 opacity-65" :
                     "ring-zinc-800 hover:ring-zinc-700"
     )}>
       {/* top row */}
       <div className="flex items-start gap-3">
-        <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center shrink-0", colorInfo.bg)}>
+        <div className={cn("hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl sm:flex", colorInfo.bg)}>
           <Icon size={18} className={colorInfo.text} strokeWidth={1.75} />
         </div>
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-sm font-semibold text-zinc-100 truncate">{item.title}</span>
-            <span className={cn("text-[10px] font-semibold px-2 py-0.5 rounded-full leading-none", freqCfg.bg, freqCfg.color)}>
+            <span className={cn("hidden rounded-full px-2 py-0.5 text-[10px] font-semibold leading-none sm:inline-flex", freqCfg.bg, freqCfg.color)}>
               {freqCfg.label}
             </span>
             {item.status !== "active" && (
-              <span className={cn("text-[10px] font-semibold px-2 py-0.5 rounded-full leading-none", statusCfg.bg, statusCfg.color)}>
+              <span className={cn("hidden rounded-full px-2 py-0.5 text-[10px] font-semibold leading-none sm:inline-flex", statusCfg.bg, statusCfg.color)}>
                 {statusCfg.label}
               </span>
             )}
           </div>
-          <p className={`text-base font-bold mt-0.5 tabular-nums ${item.type === "income" ? "text-emerald-400" : "text-zinc-100"}`}>
+          <p className={`mt-0.5 text-sm font-bold tabular-nums sm:text-base ${item.type === "income" ? "text-emerald-400" : "text-zinc-100"}`}>
             {item.type === "income" ? "+" : "-"}{formatCurrency(item.amount)}
+            <span className={cn("font-medium", recurringPaymentTextClass(payment))}> · {payment.statusLabel}</span>
           </p>
         </div>
 
         {/* mobile 3-dot menu */}
-        <MobileActionMenu
-          item={item}
-          onPause={onPause}
-          onResume={onResume}
-          onReactivate={onReactivate}
-          onEdit={onEdit}
-          onDelete={onDelete}
-        />
+        <div onClick={(event) => event.stopPropagation()} className="hidden">
+          <MobileActionMenu
+            item={item}
+            onPause={onPause}
+            onResume={onResume}
+            onReactivate={onReactivate}
+            onEdit={onEdit}
+            onDelete={onDelete}
+          />
+        </div>
       </div>
 
       {/* detail row */}
-      <div className="flex items-center gap-2 text-xs text-zinc-500 flex-wrap">
+      <div className="hidden items-center gap-2 text-xs text-zinc-500 flex-wrap sm:flex">
         {!isCompleted && (
           <div className="flex items-center gap-1">
             <Calendar size={11} strokeWidth={2} />
@@ -604,13 +618,15 @@ function RecurringCard({
       </div>
 
       {/* progress row */}
-      <ProgressBadge item={item} />
+      <div className="hidden sm:block">
+        <ProgressBadge item={item} />
+      </div>
 
       {/* desktop action buttons */}
       <div className="hidden sm:flex items-center gap-1 pt-1 border-t border-zinc-800 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
         {isActive && (
           <button
-            onClick={onPause}
+            onClick={(event) => { event.stopPropagation(); onPause(); }}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-400 hover:text-amber-400 hover:bg-amber-500/10 transition-colors"
           >
             <Pause size={12} strokeWidth={2} /> Pause
@@ -618,7 +634,7 @@ function RecurringCard({
         )}
         {item.status === "paused" && (
           <button
-            onClick={onResume}
+            onClick={(event) => { event.stopPropagation(); onResume(); }}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
           >
             <Play size={12} strokeWidth={2} /> Resume
@@ -626,7 +642,7 @@ function RecurringCard({
         )}
         {isCompleted && (
           <button
-            onClick={onReactivate}
+            onClick={(event) => { event.stopPropagation(); onReactivate(); }}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-400 hover:text-violet-400 hover:bg-violet-500/10 transition-colors"
           >
             <RefreshCw size={12} strokeWidth={2} /> Reactivate
@@ -634,14 +650,14 @@ function RecurringCard({
         )}
         {!isCompleted && (
           <button
-            onClick={onEdit}
+            onClick={(event) => { event.stopPropagation(); onEdit(); }}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-400 hover:text-[var(--theme-primary)] hover:bg-[var(--theme-primary-soft)] transition-colors"
           >
             <Pencil size={12} strokeWidth={2} /> Edit
           </button>
         )}
         <button
-          onClick={onDelete}
+          onClick={(event) => { event.stopPropagation(); onDelete(); }}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors ml-auto"
         >
           <Trash2 size={12} strokeWidth={2} /> Delete
@@ -652,6 +668,92 @@ function RecurringCard({
 }
 
 // ─── AddEditModal ─────────────────────────────────────────────────────────────
+
+function RecurringDetailsModal({
+  item,
+  linkedBill,
+  catMap,
+  walMap,
+  onClose,
+  onEdit,
+  onDelete,
+  onPause,
+  onResume,
+  onReactivate,
+}: {
+  item: AppRecurring | null;
+  linkedBill?: LinkedGeneratedBill;
+  catMap: Map<string, SupabaseCategory>;
+  walMap: Map<string, SupabaseWallet>;
+  onClose: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  onPause: () => void;
+  onResume: () => void;
+  onReactivate: () => void;
+}) {
+  const { formatCurrency } = useCurrency();
+  if (!item) return null;
+
+  const cat = catMap.get(item.categoryId);
+  const wallet = walMap.get(item.walletId);
+  const payment = getPaymentInfo(item, linkedBill);
+  const statusCfg = STATUS_CONFIG[item.status];
+  const freqCfg = FREQUENCY_CONFIG[item.frequency];
+  const notes = (item.notes ?? "").trim();
+  const isCompleted = item.status === "completed";
+  const isPaused = item.status === "paused";
+
+  return (
+    <DetailsModalShell
+      open={Boolean(item)}
+      eyebrow="Recurring Details"
+      title={item.title}
+      onClose={onClose}
+      footer={
+        <>
+          {item.status === "active" && (
+            <button onClick={onPause} className="flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium text-amber-400 transition-colors hover:bg-amber-500/10">
+              <Pause size={14} />
+              Pause
+            </button>
+          )}
+          {isPaused && (
+            <button onClick={onResume} className="flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium text-emerald-400 transition-colors hover:bg-emerald-500/10">
+              <Play size={14} />
+              Resume
+            </button>
+          )}
+          {isCompleted && (
+            <button onClick={onReactivate} className="flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium text-violet-400 transition-colors hover:bg-violet-500/10">
+              <RefreshCw size={14} />
+              Reactivate
+            </button>
+          )}
+          <button onClick={onEdit} className="flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-[var(--theme-primary-soft)] hover:text-[var(--theme-primary)]">
+            <Pencil size={14} />
+            Edit
+          </button>
+          <button onClick={onDelete} className="flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold text-rose-400 transition-colors hover:bg-rose-500/10">
+            <Trash2 size={14} />
+            Delete
+          </button>
+        </>
+      }
+    >
+      <DetailRows>
+        <DetailRow label="Amount" value={`${item.type === "income" ? "+" : "-"}${formatCurrency(item.amount)}`} accent={cn("font-bold tabular-nums", item.type === "income" ? "text-emerald-400" : "text-rose-300")} />
+        <DetailRow label="Status" value={payment.statusLabel} accent={recurringPaymentTextClass(payment)} />
+        <DetailRow label="Frequency" value={freqCfg.label} accent={freqCfg.color} />
+        <DetailRow label="Wallet" value={wallet?.name ?? "No wallet"} />
+        <DetailRow label="Category" value={cat?.name ?? "No category"} />
+        <DetailRow label={payment.dateLabel} value={formatEndDate(payment.date)} />
+        <DetailRow label="End" value={item.endCondition === "forever" ? "No end date" : item.endCondition === "end_date" && item.endDate ? formatEndDate(item.endDate) : `${item.occurrencesCount} of ${item.maxOccurrences ?? 0} occurrences`} />
+        <DetailRow label="Notes" value={notes || "No notes added"} multiline />
+      </DetailRows>
+    </DetailsModalShell>
+  );
+}
 
 type ModalState =
   | { mode: "closed" }
@@ -1316,9 +1418,10 @@ export function RecurringView() {
   const [typeFilter,   setTypeFilter]   = useState<TypeFilter>("all");
   const [frequencyFilter, setFrequencyFilter] = useState<FrequencyFilter>("all");
   const [search,       setSearch]       = useState("");
-  const [filterOpen,   setFilterOpen]   = useState(false);
-  const [modal,        setModal]        = useState<ModalState>({ mode: "closed" });
-  const [deleteTarget, setDeleteTarget] = useState<AppRecurring | null>(null);
+  const [filterOpen,    setFilterOpen]    = useState(false);
+  const [modal,         setModal]         = useState<ModalState>({ mode: "closed" });
+  const [detailsTarget, setDetailsTarget] = useState<AppRecurring | null>(null);
+  const [deleteTarget,  setDeleteTarget]  = useState<AppRecurring | null>(null);
   const [deleting,     setDeleting]     = useState(false);
   const [deleteError,  setDeleteError]  = useState("");
   const [actioning,    setActioning]    = useState<string | null>(null);
@@ -1745,6 +1848,7 @@ export function RecurringView() {
                     linkedBill={getLinkedGeneratedBill(item, linkedBillMap)}
                     catMap={catMap}
                     walMap={walMap}
+                    onOpen={() => setDetailsTarget(item)}
                     onEdit={() => setModal({ mode: "edit", item })}
                     onDelete={() => setDeleteTarget(item)}
                     onPause={() => !actioning && handleSetStatus(item, "paused")}
@@ -1785,6 +1889,41 @@ export function RecurringView() {
           setFrequencyFilter("all");
         }}
         onClose={() => setFilterOpen(false)}
+      />
+      <RecurringDetailsModal
+        item={detailsTarget}
+        linkedBill={detailsTarget ? getLinkedGeneratedBill(detailsTarget, linkedBillMap) : undefined}
+        catMap={catMap}
+        walMap={walMap}
+        onClose={() => setDetailsTarget(null)}
+        onEdit={() => {
+          if (!detailsTarget) return;
+          setModal({ mode: "edit", item: detailsTarget });
+          setDetailsTarget(null);
+        }}
+        onDelete={() => {
+          if (!detailsTarget) return;
+          setDeleteTarget(detailsTarget);
+          setDetailsTarget(null);
+        }}
+        onPause={() => {
+          if (!detailsTarget || actioning) return;
+          const target = detailsTarget;
+          setDetailsTarget(null);
+          void handleSetStatus(target, "paused");
+        }}
+        onResume={() => {
+          if (!detailsTarget || actioning) return;
+          const target = detailsTarget;
+          setDetailsTarget(null);
+          void handleSetStatus(target, "active");
+        }}
+        onReactivate={() => {
+          if (!detailsTarget || actioning) return;
+          const target = detailsTarget;
+          setDetailsTarget(null);
+          void handleSetStatus(target, "active");
+        }}
       />
       <DeleteConfirmModal
         item={deleteTarget}

@@ -26,6 +26,8 @@ import { loggedSupabase } from "@/lib/supabase/query";
 import { useAuth } from "@/context/auth-context";
 import { useCurrency } from "@/context/currency-context";
 import { CurrencyInputPrefix } from "@/components/ui/currency-input-prefix";
+import { FilePreviewModal } from "@/components/ui/file-preview-modal";
+import { DetailRow, DetailRows } from "@/components/ui/details-modal";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { archiveWallet, createTransaction, createWallet, getWallets, updateWallet, type WalletType, type WalletColor } from "@/lib/db";
@@ -527,6 +529,7 @@ function WalletQrControls({
   onRemove: () => void;
 }) {
   const inputId = useId();
+  const [previewOpen, setPreviewOpen] = useState(false);
   return (
     <div className="rounded-xl border border-border bg-card/80 p-3 text-card-foreground">
       <div className="flex items-center justify-between gap-3">
@@ -549,7 +552,7 @@ function WalletQrControls({
       }} />
       {selection.previewUrl && (
         <div className="mt-3 flex items-center gap-3">
-          <button type="button" onClick={() => window.open(selection.previewUrl, "_blank", "noopener,noreferrer")} className="h-16 w-16 overflow-hidden rounded-lg bg-[var(--theme-card)] ring-1 ring-border">
+          <button type="button" onClick={() => setPreviewOpen(true)} className="h-16 w-16 overflow-hidden rounded-lg bg-[var(--theme-card)] ring-1 ring-border">
             <img src={selection.previewUrl} alt="Wallet QR preview" className="h-full w-full object-cover" />
           </button>
           <button type="button" onClick={onRemove} className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive/10">
@@ -559,6 +562,14 @@ function WalletQrControls({
         </div>
       )}
       {error && <p className="mt-2 rounded-lg bg-rose-500/10 px-3 py-2 text-xs text-rose-400">{error}</p>}
+      <FilePreviewModal
+        open={previewOpen}
+        url={selection.previewUrl}
+        fileName="wallet-qr-code"
+        mimeType="image/png"
+        title="QR Code Preview"
+        onClose={() => setPreviewOpen(false)}
+      />
     </div>
   );
 }
@@ -1281,6 +1292,7 @@ function WalletDetailsModal({
 }) {
   const { formatCurrency } = useCurrency();
   const [copied, setCopied] = useState("");
+  const [qrPreviewOpen, setQrPreviewOpen] = useState(false);
   if (!wallet) return null;
   const normalizedType = normalizeWalletType(wallet.type);
   const showBank = normalizedType === "Bank Account";
@@ -1297,95 +1309,87 @@ function WalletDetailsModal({
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center p-3 sm:p-4">
       <div className="absolute inset-0 theme-overlay backdrop-blur-sm" onClick={onClose} />
-      <div className="dezu-modal-panel relative flex max-h-[85dvh] w-full flex-col overflow-hidden rounded-2xl bg-zinc-900 shadow-2xl ring-1 ring-white/10 sm:max-w-lg">
-        <div className="dezu-modal-header flex shrink-0 items-start justify-between gap-4 border-b border-zinc-800 px-5 py-4">
+      <div className="theme-surface relative flex max-h-[85dvh] w-full flex-col overflow-hidden rounded-2xl shadow-2xl ring-1 ring-border sm:max-w-lg">
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border px-5 py-4">
           <div className="min-w-0">
-            <p className="text-xs font-medium text-zinc-500">Wallet Details</p>
-            <h2 className="mt-1 truncate text-lg font-semibold text-zinc-50">{wallet.name}</h2>
+            <p className="text-xs font-medium text-muted-foreground">Wallet Details</p>
+            <h2 className="mt-1 truncate text-lg font-semibold text-card-foreground">{wallet.name}</h2>
           </div>
-          <button onClick={onClose} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-[var(--theme-primary-soft)] hover:text-[var(--theme-primary)]">
+          <button onClick={onClose} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-[var(--theme-primary-soft)] hover:text-[var(--theme-primary)]">
             <X size={16} />
           </button>
         </div>
 
         <div className="dezu-modal-body min-h-0 flex-1 overflow-y-auto px-5 py-5">
-          <div className="mb-4 rounded-xl bg-card/80 px-3 py-3 ring-1 ring-border">
-            <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Balance</p>
-            <p className="mt-1 text-xl font-bold tabular-nums text-card-foreground">{formatCurrency(wallet.balance)}</p>
-          </div>
-
-          {!detailsAvailable && (
-            <div className="rounded-xl bg-card/80 px-3 py-3 text-sm text-muted-foreground ring-1 ring-border">
-              No account details saved.
-            </div>
-          )}
-
-          {detailsAvailable && (
-            <div className="space-y-3">
-              {(showBank || showEWallet) && wallet.account_name && (
-                <div className="rounded-xl bg-card/80 px-3 py-2.5 ring-1 ring-border">
-                  <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Account Name</p>
-                  <p className="mt-1 break-words text-sm font-medium text-card-foreground">{wallet.account_name}</p>
-                </div>
-              )}
-              {showBank && wallet.bank_name && (
-                <div className="rounded-xl bg-card/80 px-3 py-2.5 ring-1 ring-border">
-                  <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Bank Name</p>
-                  <p className="mt-1 break-words text-sm font-medium text-card-foreground">{wallet.bank_name}</p>
-                </div>
-              )}
-              {showBank && wallet.account_number && (
-                <div className="rounded-xl bg-card/80 px-3 py-2.5 ring-1 ring-border">
-                  <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Account Number</p>
-                  <div className="mt-1 flex items-center justify-between gap-2">
-                    <p className="break-all text-sm font-medium text-card-foreground">{wallet.account_number}</p>
-                    <button onClick={() => void copyValue("Account number", wallet.account_number)} className="theme-hover flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-[var(--theme-card)] px-2.5 text-xs font-medium text-foreground ring-1 ring-border transition-colors">
-                      <Copy size={12} />
+          <DetailRows>
+            <DetailRow label="Balance" value={formatCurrency(wallet.balance)} accent="font-bold tabular-nums" />
+            <DetailRow label="Type" value={normalizedType} />
+            {(showBank || showEWallet) && wallet.account_name && <DetailRow label="Account" value={wallet.account_name} />}
+            {showBank && wallet.bank_name && <DetailRow label="Bank" value={wallet.bank_name} />}
+            {showBank && wallet.account_number && (
+              <DetailRow
+                label="Number"
+                value={(
+                  <span className="inline-flex max-w-full items-center justify-end gap-2 sm:justify-start">
+                    <span className="truncate">{wallet.account_number}</span>
+                    <button onClick={() => void copyValue("Account number", wallet.account_number)} className="theme-hover inline-flex h-7 shrink-0 items-center gap-1 rounded-md bg-[var(--theme-card)] px-2 text-[11px] font-medium text-foreground ring-1 ring-border">
+                      <Copy size={11} />
                       Copy
                     </button>
-                  </div>
-                </div>
-              )}
-              {showEWallet && wallet.mobile_number && (
-                <div className="rounded-xl bg-card/80 px-3 py-2.5 ring-1 ring-border">
-                  <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Mobile Number</p>
-                  <div className="mt-1 flex items-center justify-between gap-2">
-                    <p className="break-all text-sm font-medium text-card-foreground">{wallet.mobile_number}</p>
-                    <button onClick={() => void copyValue("Mobile number", wallet.mobile_number)} className="theme-hover flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-[var(--theme-card)] px-2.5 text-xs font-medium text-foreground ring-1 ring-border transition-colors">
-                      <Copy size={12} />
+                  </span>
+                )}
+              />
+            )}
+            {showEWallet && wallet.mobile_number && (
+              <DetailRow
+                label="Mobile"
+                value={(
+                  <span className="inline-flex max-w-full items-center justify-end gap-2 sm:justify-start">
+                    <span className="truncate">{wallet.mobile_number}</span>
+                    <button onClick={() => void copyValue("Mobile number", wallet.mobile_number)} className="theme-hover inline-flex h-7 shrink-0 items-center gap-1 rounded-md bg-[var(--theme-card)] px-2 text-[11px] font-medium text-foreground ring-1 ring-border">
+                      <Copy size={11} />
                       Copy
                     </button>
-                  </div>
-                </div>
-              )}
+                  </span>
+                )}
+              />
+            )}
+            {!detailsAvailable && <DetailRow label="Details" value="No account details saved" />}
+          </DetailRows>
               {wallet.qr_code_url && (
-                <div className="rounded-xl bg-card/80 px-3 py-3 ring-1 ring-border">
+                <div className="mt-3 rounded-xl bg-card/80 px-3 py-3 ring-1 ring-border">
                   <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">QR Code</p>
                   <div className="mt-2 flex items-center gap-3">
-                    <button onClick={() => window.open(wallet.qr_code_url ?? "", "_blank", "noopener,noreferrer")} className="h-24 w-24 overflow-hidden rounded-xl bg-[var(--theme-card)] ring-1 ring-border">
+                    <button onClick={() => setQrPreviewOpen(true)} className="h-20 w-20 overflow-hidden rounded-xl bg-[var(--theme-card)] ring-1 ring-border">
                       <img src={wallet.qr_code_url} alt={`${wallet.name} QR code`} className="h-full w-full object-cover" />
                     </button>
-                    <button onClick={() => window.open(wallet.qr_code_url ?? "", "_blank", "noopener,noreferrer")} className="theme-hover flex h-9 items-center gap-1.5 rounded-lg bg-[var(--theme-card)] px-3 text-xs font-medium text-foreground ring-1 ring-border transition-colors">
+                    <button onClick={() => setQrPreviewOpen(true)} className="theme-hover flex h-9 items-center gap-1.5 rounded-lg bg-[var(--theme-card)] px-3 text-xs font-medium text-foreground ring-1 ring-border transition-colors">
                       <Eye size={13} />
                       View QR Code
                     </button>
                   </div>
                 </div>
               )}
-            </div>
-          )}
           {copied && <p className="mt-3 rounded-lg bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300">{copied} copied</p>}
         </div>
 
-        <div className="dezu-modal-footer flex shrink-0 justify-end gap-2 border-t border-zinc-800 px-5 py-4">
-          <button onClick={onEdit} className="rounded-lg px-4 py-2 text-sm font-medium text-zinc-300 transition-colors hover:bg-[var(--theme-primary-soft)] hover:text-[var(--theme-primary)]">
+        <div className="flex shrink-0 justify-end gap-2 border-t border-border px-5 py-4">
+          <button onClick={onEdit} className="rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-[var(--theme-primary-soft)] hover:text-[var(--theme-primary)]">
             Edit Wallet
           </button>
-          <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm font-medium text-zinc-400 transition-colors hover:bg-[var(--theme-primary-soft)] hover:text-[var(--theme-primary)]">
+          <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-[var(--theme-primary-soft)] hover:text-[var(--theme-primary)]">
             Close
           </button>
         </div>
       </div>
+      <FilePreviewModal
+        open={qrPreviewOpen}
+        url={wallet.qr_code_url ?? null}
+        fileName={wallet.qr_code_file_name ?? `${wallet.name}-qr-code`}
+        mimeType={wallet.qr_code_mime_type ?? "image/png"}
+        title="QR Code Preview"
+        onClose={() => setQrPreviewOpen(false)}
+      />
     </div>
   );
 }

@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { CurrencyInputPrefix } from "@/components/ui/currency-input-prefix";
+import { DetailRow, DetailRows, DetailsModalShell } from "@/components/ui/details-modal";
 import { createClient } from "@/lib/supabase/client";
 import { loggedSupabase, settledError } from "@/lib/supabase/query";
 import { useAuth } from "@/context/auth-context";
@@ -219,9 +220,10 @@ function SummaryCard({ label, value, sub, accent, className }: {
 // ─── GoalCard ─────────────────────────────────────────────────────────────────
 
 function GoalCard({
-  goal, onEdit, onDelete, onContribute,
+  goal, onOpen, onEdit, onDelete, onContribute,
 }: {
   goal: AppGoal;
+  onOpen: () => void;
   onEdit: () => void;
   onDelete: () => void;
   onContribute: () => void;
@@ -240,8 +242,8 @@ function GoalCard({
   const isPaused   = goal.status === "paused";
 
   return (
-    <div className={cn(
-      "dezu-card flex flex-col gap-3 rounded-[1.15rem] bg-card/90 p-4 transition-all group",
+    <div role="button" tabIndex={0} onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onOpen(); }} className={cn(
+      "dezu-card group flex flex-col gap-2 rounded-xl bg-card/90 p-3 transition-all hover:ring-1 hover:ring-[var(--theme-primary)]/30 sm:gap-3 sm:rounded-[1.15rem] sm:p-4",
       isDone   ? "ring-emerald-500/30" :
       isPaused ? "ring-zinc-800/50 opacity-70" :
                  "ring-zinc-800 hover:ring-zinc-700"
@@ -249,7 +251,7 @@ function GoalCard({
       {/* top row */}
       <div className="flex items-start gap-3">
         <div className={cn(
-          "w-11 h-11 rounded-xl flex items-center justify-center shrink-0 relative",
+          "relative hidden h-11 w-11 shrink-0 items-center justify-center rounded-xl sm:flex",
           colorEntry.bg
         )}>
           <Icon size={20} className={colorEntry.text} strokeWidth={1.75} />
@@ -263,14 +265,14 @@ function GoalCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-start gap-2">
             <h3 className="text-sm font-semibold text-zinc-100 leading-snug flex-1 min-w-0">{goal.name}</h3>
-            <span className={cn("text-[10px] font-semibold px-2 py-0.5 rounded-full leading-none shrink-0", dateBadge.bgClass, dateBadge.textClass)}>
+            <span className={cn("hidden shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold leading-none sm:inline-flex", dateBadge.bgClass, dateBadge.textClass)}>
               {dateBadge.label}
             </span>
           </div>
 
           {/* amounts */}
-          <div className="flex items-baseline gap-1.5 mt-1">
-            <span className={cn("text-lg font-bold tabular-nums", isDone ? "text-emerald-400" : "text-zinc-100")}>
+          <div className="mt-1 flex items-baseline gap-1.5">
+            <span className={cn("text-sm font-bold tabular-nums sm:text-lg", isDone ? "text-emerald-400" : "text-zinc-100")}>
               {formatCurrency(goal.currentAmount)}
             </span>
             <span className="text-xs text-zinc-500">of {formatCurrency(goal.targetAmount)}</span>
@@ -280,7 +282,7 @@ function GoalCard({
 
       {/* progress bar */}
       <div className="flex flex-col gap-1.5">
-        <div className="flex items-center justify-between text-xs">
+        <div className="hidden items-center justify-between text-xs sm:flex">
           <span className={cn("font-semibold tabular-nums", isDone ? "text-emerald-400" : "text-zinc-300")}>
             {percentage.toFixed(1)}%
           </span>
@@ -291,7 +293,7 @@ function GoalCard({
             <span className="text-emerald-400 font-medium">Goal reached!</span>
           )}
         </div>
-        <div className="h-2.5 bg-zinc-800 rounded-full overflow-hidden">
+        <div className="h-1.5 overflow-hidden rounded-full bg-zinc-800 sm:h-2.5">
           <div
             className={cn("h-full rounded-full transition-all duration-700", barColor)}
             style={{ width: `${barWidth}%` }}
@@ -300,7 +302,7 @@ function GoalCard({
       </div>
 
       {/* meta row */}
-      <div className="flex items-center gap-2 text-xs text-zinc-500 flex-wrap">
+      <div className="hidden items-center gap-2 text-xs text-zinc-500 flex-wrap sm:flex">
         <span>📅 {formatTargetDate(goal.targetDate)}</span>
         {goal.notes && (
           <span className="truncate max-w-[140px]">· {goal.notes}</span>
@@ -308,10 +310,10 @@ function GoalCard({
       </div>
 
       {/* actions row */}
-      <div className="flex items-center gap-2 pt-1 border-t border-zinc-800">
+      <div className="hidden items-center gap-2 border-t border-zinc-800 pt-1 sm:flex">
         {!isDone && (
           <button
-            onClick={onContribute}
+            onClick={(event) => { event.stopPropagation(); onContribute(); }}
             className={cn(
               "flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-semibold transition-colors",
               colorEntry.bg, colorEntry.text, "hover:opacity-80"
@@ -323,7 +325,7 @@ function GoalCard({
         )}
         {isDone && (
           <button
-            onClick={onContribute}
+            onClick={(event) => { event.stopPropagation(); onContribute(); }}
             className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium text-zinc-500 hover:text-[var(--theme-primary)] hover:bg-[var(--theme-primary-soft)] transition-colors"
           >
             <ChevronDown size={12} strokeWidth={2} />
@@ -332,14 +334,14 @@ function GoalCard({
         )}
         <div className="flex items-center gap-1 shrink-0 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
           <button
-            onClick={onEdit}
+            onClick={(event) => { event.stopPropagation(); onEdit(); }}
             className="w-8 h-8 rounded-lg flex items-center justify-center text-zinc-500 hover:text-[var(--theme-primary)] hover:bg-[var(--theme-primary-soft)] transition-colors"
             title="Edit"
           >
             <Pencil size={13} strokeWidth={2} />
           </button>
           <button
-            onClick={onDelete}
+            onClick={(event) => { event.stopPropagation(); onDelete(); }}
             className="w-8 h-8 rounded-lg flex items-center justify-center text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
             title="Delete"
           >
@@ -352,6 +354,75 @@ function GoalCard({
 }
 
 // ─── ContributeModal ──────────────────────────────────────────────────────────
+
+function GoalDetailsModal({
+  goal,
+  wallet,
+  onClose,
+  onContribute,
+  onEdit,
+  onDelete,
+}: {
+  goal: AppGoal | null;
+  wallet?: GoalWallet;
+  onClose: () => void;
+  onContribute: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const { formatCurrency } = useCurrency();
+  if (!goal) return null;
+
+  const percentage = goal.targetAmount > 0 ? (goal.currentAmount / goal.targetAmount) * 100 : 0;
+  const barWidth = Math.min(percentage, 100);
+  const colorEntry = getColorEntry(goal.color);
+  const barColor = getProgressBarColor(percentage, goal.status, colorEntry);
+  const notes = (goal.notes ?? "").trim();
+
+  return (
+    <DetailsModalShell
+      open={Boolean(goal)}
+      eyebrow="Goal Details"
+      title={goal.name}
+      onClose={onClose}
+      footer={
+        <>
+          <button onClick={onContribute} className="flex items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90">
+            <Plus size={14} />
+            Contribute
+          </button>
+          <button onClick={onEdit} className="flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-[var(--theme-primary-soft)] hover:text-[var(--theme-primary)]">
+            <Pencil size={14} />
+            Edit
+          </button>
+          <button onClick={onDelete} className="flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold text-rose-400 transition-colors hover:bg-rose-500/10">
+            <Trash2 size={14} />
+            Delete
+          </button>
+        </>
+      }
+    >
+          <div className="mb-3 rounded-xl bg-card/80 px-3 py-3 ring-1 ring-border">
+            <div className="flex items-center justify-between gap-3 text-xs">
+              <span className="font-semibold text-card-foreground">{percentage.toFixed(1)}%</span>
+              <span className="text-muted-foreground">{formatCurrency(goal.currentAmount)} / {formatCurrency(goal.targetAmount)}</span>
+            </div>
+            <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-muted">
+              <div className={cn("h-full rounded-full transition-all", barColor)} style={{ width: `${barWidth}%` }} />
+            </div>
+          </div>
+
+      <DetailRows>
+        <DetailRow label="Saved" value={formatCurrency(goal.currentAmount)} accent="font-bold tabular-nums" />
+        <DetailRow label="Target" value={formatCurrency(goal.targetAmount)} accent="font-bold tabular-nums" />
+        <DetailRow label="Progress" value={`${percentage.toFixed(1)}%`} />
+        <DetailRow label="Wallet" value={wallet?.name ?? "No wallet"} />
+        <DetailRow label="Target Date" value={formatTargetDate(goal.targetDate)} />
+        <DetailRow label="Notes" value={notes || "No notes added"} multiline />
+      </DetailRows>
+    </DetailsModalShell>
+  );
+}
 
 const QUICK_AMOUNTS = [500, 1000, 5000, 10000];
 
@@ -1226,6 +1297,7 @@ export function GoalsView() {
   const [search,            setSearch]           = useState("");
   const [filterOpen,        setFilterOpen]       = useState(false);
   const [modal,             setModal]            = useState<ModalState>({ mode: "closed" });
+  const [detailsTarget,     setDetailsTarget]    = useState<AppGoal | null>(null);
   const [contributeTarget,  setContributeTarget] = useState<AppGoal | null>(null);
   const [deleteTarget,      setDeleteTarget]     = useState<AppGoal | null>(null);
   const [deleting,          setDeleting]         = useState(false);
@@ -1502,6 +1574,7 @@ export function GoalsView() {
                   <GoalCard
                     key={goal.id}
                     goal={goal}
+                    onOpen={() => setDetailsTarget(goal)}
                     onEdit={() => setModal({ mode: "edit", goal })}
                     onDelete={() => setDeleteTarget(goal)}
                     onContribute={() => setContributeTarget(goal)}
@@ -1529,6 +1602,26 @@ export function GoalsView() {
         isOffline={isGuest}
         onClose={() => setContributeTarget(null)}
         onSaved={loadGoals}
+      />
+      <GoalDetailsModal
+        goal={detailsTarget}
+        wallet={detailsTarget?.walletId ? wallets.find((wallet) => wallet.id === detailsTarget.walletId) : undefined}
+        onClose={() => setDetailsTarget(null)}
+        onContribute={() => {
+          if (!detailsTarget) return;
+          setContributeTarget(detailsTarget);
+          setDetailsTarget(null);
+        }}
+        onEdit={() => {
+          if (!detailsTarget) return;
+          setModal({ mode: "edit", goal: detailsTarget });
+          setDetailsTarget(null);
+        }}
+        onDelete={() => {
+          if (!detailsTarget) return;
+          setDeleteTarget(detailsTarget);
+          setDetailsTarget(null);
+        }}
       />
       <GoalsFilterModal
         open={filterOpen}
