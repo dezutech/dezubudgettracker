@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { CurrencyInputPrefix } from "@/components/ui/currency-input-prefix";
+import { ReceiptAttachment } from "@/components/ui/receipt-attachment";
 import { useAuth } from "@/context/auth-context";
 import { useCurrency } from "@/context/currency-context";
 import { cn } from "@/lib/utils";
@@ -42,6 +43,12 @@ import {
   type DbWallet,
 } from "@/lib/db";
 import { OFFLINE_USER_ID } from "@/lib/offline/constants";
+import {
+  EMPTY_RECEIPT,
+  getReceiptMetadata,
+  resolveReceiptMetadata,
+  type ReceiptDraft,
+} from "@/lib/receipts";
 
 type BillStatus = "unpaid" | "paid" | "overdue" | "scheduled";
 type FilterTab = "all" | "due_month" | "upcoming" | "overdue" | "paid";
@@ -64,6 +71,13 @@ type SupabaseBill = {
   notes: string | null;
   is_recurring: boolean;
   recurring_id: string | null;
+  generated_occurrence_date: string | null;
+  bill_id: string | null;
+  receipt_url: string | null;
+  receipt_path: string | null;
+  receipt_file_name: string | null;
+  receipt_mime_type: string | null;
+  receipt_size: number | null;
 };
 
 type SupabaseRecurringRow = {
@@ -112,6 +126,13 @@ function localBillToSupabase(bill: DbBill): SupabaseBill {
     notes: bill.notes ?? null,
     is_recurring: bill.isRecurring,
     recurring_id: bill.recurringId != null ? String(bill.recurringId) : null,
+    generated_occurrence_date: bill.generatedOccurrenceDate ?? null,
+    bill_id: bill.billId != null ? String(bill.billId) : String(bill.id),
+    receipt_url: bill.receipt_url ?? null,
+    receipt_path: bill.receipt_path ?? null,
+    receipt_file_name: bill.receipt_file_name ?? null,
+    receipt_mime_type: bill.receipt_mime_type ?? null,
+    receipt_size: bill.receipt_size ?? null,
   };
 }
 
@@ -232,7 +253,7 @@ async function syncRecurringMonthlyBills(userId: string) {
     "existing recurring bills",
     supabase
       .from("bills")
-      .select("recurring_id,due_date")
+      .select("recurring_id,generated_occurrence_date,due_date")
       .eq("user_id", userId)
       .eq("is_deleted", false)
       .not("recurring_id", "is", null)
@@ -241,8 +262,8 @@ async function syncRecurringMonthlyBills(userId: string) {
   if (existingError) return existingError.message;
 
   const existing = new Set(
-    ((existingRows ?? []) as Pick<SupabaseBill, "recurring_id" | "due_date">[])
-      .map((bill) => `${bill.recurring_id}:${bill.due_date}`)
+    ((existingRows ?? []) as Pick<SupabaseBill, "recurring_id" | "generated_occurrence_date" | "due_date">[])
+      .map((bill) => `${bill.recurring_id}:${bill.generated_occurrence_date ?? bill.due_date}`)
   );
   const queued = new Set<string>();
 
@@ -258,6 +279,7 @@ async function syncRecurringMonthlyBills(userId: string) {
       notes: string;
       is_recurring: boolean;
       recurring_id: string;
+      generated_occurrence_date: string;
     }> = [];
 
     let dueDate = item.next_run_date;
@@ -277,6 +299,7 @@ async function syncRecurringMonthlyBills(userId: string) {
           notes: "Generated from recurring transaction",
           is_recurring: true,
           recurring_id: item.id,
+          generated_occurrence_date: dueDate,
         });
       }
       dueDate = nextMonthDate(dueDate);
@@ -386,6 +409,7 @@ function BillModal({
   const [walletId, setWalletId] = useState(initialBill?.wallet_id ?? "");
   const [status, setStatus] = useState<BillStatus>(initialBill?.status ?? "unpaid");
   const [notes, setNotes] = useState(initialBill?.notes ?? "");
+  const [receiptDraft, setReceiptDraft] = useState<ReceiptDraft>({ file: null, remove: false });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -404,6 +428,15 @@ function BillModal({
 
     setSaving(true);
     try {
+      if (!isOffline && !userId) { setError("Please sign in to save bills."); return; }
+      const receipt = await resolveReceiptMetadata({
+        current: initialBill ? getReceiptMetadata(initialBill) : EMPTY_RECEIPT,
+        draft: receiptDraft,
+        isOffline,
+        userId: isOffline ? OFFLINE_USER_ID : userId ?? "",
+        scope: "bills",
+      });
+
       if (isOffline) {
         const payload = {
           userId: OFFLINE_USER_ID,
@@ -416,6 +449,9 @@ function BillModal({
           notes: notes.trim() || undefined,
           isRecurring: isEdit ? state.bill.is_recurring : false,
           recurringId: isEdit && state.bill.recurring_id ? Number(state.bill.recurring_id) : null,
+          generatedOccurrenceDate: isEdit ? state.bill.generated_occurrence_date ?? state.bill.due_date : null,
+          billId: isEdit ? Number(state.bill.bill_id ?? state.bill.id) : null,
+          ...receipt,
           isDeleted: false,
         };
         if (isEdit) {
@@ -428,7 +464,6 @@ function BillModal({
         return;
       }
 
-      if (!userId) { setError("Please sign in to save bills."); return; }
       const supabase = createClient();
       const payload = {
         user_id: userId,
@@ -441,6 +476,8 @@ function BillModal({
         notes: notes.trim() || null,
         is_recurring: isEdit ? state.bill.is_recurring : false,
         recurring_id: isEdit ? state.bill.recurring_id : null,
+        generated_occurrence_date: isEdit ? state.bill.generated_occurrence_date ?? state.bill.due_date : null,
+        ...receipt,
       };
 
       const result = isEdit
@@ -530,6 +567,14 @@ function BillModal({
               <label className="text-xs font-medium text-zinc-400">Notes</label>
               <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} placeholder="Optional notes" className="w-full resize-none rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-emerald-500/60 focus:outline-none focus:ring-2 focus:ring-emerald-500/40" />
             </div>
+
+            <div className="sm:col-span-2">
+              <ReceiptAttachment
+                value={initialBill}
+                draft={receiptDraft}
+                onDraftChange={setReceiptDraft}
+              />
+            </div>
           </div>
 
           {error && (
@@ -555,6 +600,7 @@ function BillRow({
   bill,
   category,
   wallet,
+  onOpen,
   onEdit,
   onDelete,
   onPaid,
@@ -564,6 +610,7 @@ function BillRow({
   bill: SupabaseBill;
   category?: SupabaseCategory;
   wallet?: SupabaseWallet;
+  onOpen: () => void;
   onEdit: () => void;
   onDelete: () => void;
   onPaid: () => void;
@@ -574,7 +621,7 @@ function BillRow({
   const dueSoon = bill.status !== "paid" && daysUntil(bill.due_date) >= 0 && daysUntil(bill.due_date) <= 3;
 
   return (
-    <div className="dezu-card rounded-[1.15rem] bg-card/90 p-4 transition-colors">
+    <div role="button" tabIndex={0} onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onOpen(); }} className="dezu-card rounded-[1.15rem] bg-card/90 p-4 transition-colors hover:ring-1 hover:ring-[var(--theme-primary)]/30">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-400">
           <ReceiptText size={18} strokeWidth={1.8} />
@@ -604,21 +651,165 @@ function BillRow({
             </span>
             {bill.notes && <span className="truncate sm:max-w-[220px]">{bill.notes}</span>}
           </div>
+          {bill.receipt_url && (
+            <div className="mt-3 max-w-sm">
+              <ReceiptAttachment value={bill} draft={{ file: null, remove: false }} onDraftChange={() => {}} readOnly compact />
+            </div>
+          )}
         </div>
 
         <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
           {bill.status !== "paid" && (
-            <button onClick={onPaid} disabled={paying} className="flex min-h-9 items-center gap-1.5 rounded-lg bg-emerald-500 px-3 py-2 text-xs font-semibold text-zinc-950 transition-colors hover:bg-emerald-400 disabled:pointer-events-none disabled:opacity-60">
+            <button onClick={(event) => { event.stopPropagation(); onPaid(); }} disabled={paying} className="flex min-h-9 items-center gap-1.5 rounded-lg bg-emerald-500 px-3 py-2 text-xs font-semibold text-zinc-950 transition-colors hover:bg-emerald-400 disabled:pointer-events-none disabled:opacity-60">
               {paying ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
               Mark paid
             </button>
           )}
-          <button onClick={onEdit} className="theme-hover flex min-h-9 items-center gap-1.5 rounded-lg bg-[var(--theme-card)] px-3 py-2 text-xs font-medium text-muted-foreground transition-colors">
+          <button onClick={(event) => { event.stopPropagation(); onEdit(); }} className="theme-hover flex min-h-9 items-center gap-1.5 rounded-lg bg-[var(--theme-card)] px-3 py-2 text-xs font-medium text-muted-foreground transition-colors">
             <Pencil size={13} />
             Edit
           </button>
-          <button onClick={onDelete} className="flex min-h-9 items-center justify-center rounded-lg px-3 py-2 text-rose-300 transition-colors hover:bg-rose-500/10">
+          <button onClick={(event) => { event.stopPropagation(); onDelete(); }} className="flex min-h-9 items-center justify-center rounded-lg px-3 py-2 text-rose-300 transition-colors hover:bg-rose-500/10">
             <Trash2 size={14} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MarkPaidModal({
+  bill,
+  paying,
+  error,
+  onClose,
+  onConfirm,
+}: {
+  bill: SupabaseBill | null;
+  paying: boolean;
+  error: string;
+  onClose: () => void;
+  onConfirm: (draft: ReceiptDraft) => void;
+}) {
+  const [receiptDraft, setReceiptDraft] = useState<ReceiptDraft>({ file: null, remove: false });
+
+  useEffect(() => {
+    if (bill) setReceiptDraft({ file: null, remove: false });
+  }, [bill]);
+
+  if (!bill) return null;
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-end justify-center p-0 sm:items-center sm:p-4">
+      <div className="absolute inset-0 theme-overlay backdrop-blur-sm" onClick={paying ? undefined : onClose} />
+      <div className="theme-surface relative w-full rounded-t-2xl shadow-2xl ring-1 ring-border sm:max-w-md sm:rounded-2xl">
+        <div className="flex items-center justify-between border-b border-border px-5 py-4">
+          <div className="min-w-0">
+            <p className="text-xs text-muted-foreground">Mark bill as paid</p>
+            <h2 className="truncate text-base font-semibold text-card-foreground">{bill.title}</h2>
+          </div>
+          <button type="button" onClick={onClose} disabled={paying} className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50">
+            <X size={15} />
+          </button>
+        </div>
+        <div className="space-y-4 px-5 py-5">
+          <ReceiptAttachment value={bill} draft={receiptDraft} onDraftChange={setReceiptDraft} />
+          {error && <p className="rounded-lg bg-rose-500/10 px-3 py-2 text-xs text-rose-300">{error}</p>}
+        </div>
+        <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
+          <button type="button" onClick={onClose} disabled={paying} className="rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50">
+            Cancel
+          </button>
+          <button type="button" onClick={() => onConfirm(receiptDraft)} disabled={paying} className="flex items-center gap-1.5 rounded-lg bg-emerald-500 px-5 py-2 text-sm font-semibold text-zinc-950 transition-colors hover:bg-emerald-400 disabled:pointer-events-none disabled:opacity-60">
+            {paying && <Loader2 size={13} className="animate-spin" />}
+            Mark paid
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BillDetailsModal({
+  bill,
+  category,
+  wallet,
+  onClose,
+  onEdit,
+  onDelete,
+}: {
+  bill: SupabaseBill | null;
+  category?: SupabaseCategory;
+  wallet?: SupabaseWallet;
+  onClose: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const { formatCurrency } = useCurrency();
+  if (!bill) return null;
+  const status = effectiveStatus(bill);
+  const notes = (bill.notes ?? "").trim();
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-end justify-center p-0 sm:items-center sm:p-4">
+      <div className="absolute inset-0 theme-overlay backdrop-blur-sm" onClick={onClose} />
+      <div className="dezu-modal-panel relative w-full bg-zinc-900 shadow-2xl ring-1 ring-white/10 sm:max-w-lg sm:rounded-2xl">
+        <div className="dezu-modal-header flex items-start justify-between gap-4 border-b border-zinc-800 px-5 py-4">
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-zinc-500">Bill Details</p>
+            <h2 className="mt-1 truncate text-lg font-semibold text-zinc-50">{bill.title}</h2>
+          </div>
+          <button onClick={onClose} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-[var(--theme-primary-soft)] hover:text-[var(--theme-primary)]">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="dezu-modal-body max-h-[70dvh] overflow-y-auto px-5 py-5">
+          <div className="mb-4 flex items-center justify-between gap-3 rounded-xl bg-zinc-800/60 px-3 py-3">
+            <div>
+              <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">Amount</p>
+              <p className="mt-1 text-xl font-bold tabular-nums text-zinc-50">{formatCurrency(bill.amount)}</p>
+            </div>
+            <StatusBadge status={status} />
+          </div>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <div className="rounded-xl bg-zinc-800/60 px-3 py-2.5">
+              <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">Due Date</p>
+              <p className="mt-1 text-sm font-medium text-zinc-100">{formatDate(bill.due_date)}</p>
+            </div>
+            <div className="rounded-xl bg-zinc-800/60 px-3 py-2.5">
+              <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">Wallet</p>
+              <p className="mt-1 text-sm font-medium text-zinc-100">{wallet?.name ?? "No wallet"}</p>
+            </div>
+            <div className="rounded-xl bg-zinc-800/60 px-3 py-2.5">
+              <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">Category</p>
+              <p className="mt-1 text-sm font-medium text-zinc-100">{category?.name ?? "No category"}</p>
+            </div>
+            <div className="rounded-xl bg-zinc-800/60 px-3 py-2.5">
+              <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">Type</p>
+              <p className="mt-1 text-sm font-medium text-zinc-100">{bill.is_recurring ? "Recurring bill" : "Bill"}</p>
+            </div>
+          </div>
+          <div className="mt-2 rounded-xl bg-zinc-800/60 px-3 py-3">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">Notes</p>
+            <p className={cn("mt-1 whitespace-pre-wrap break-words text-sm", notes ? "text-zinc-100" : "text-zinc-500")}>
+              {notes || "No notes added"}
+            </p>
+          </div>
+          <div className="mt-2">
+            <ReceiptAttachment value={bill} draft={{ file: null, remove: false }} onDraftChange={() => {}} readOnly />
+          </div>
+        </div>
+        <div className="dezu-modal-footer flex flex-col gap-2 border-t border-zinc-800 px-5 py-4 sm:flex-row sm:items-center sm:justify-end">
+          <button onClick={onEdit} className="flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium text-zinc-300 transition-colors hover:bg-[var(--theme-primary-soft)] hover:text-[var(--theme-primary)]">
+            <Pencil size={14} />
+            Edit Bill
+          </button>
+          <button onClick={onDelete} className="flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold text-rose-400 transition-colors hover:bg-rose-500/10">
+            <Trash2 size={14} />
+            Delete Bill
+          </button>
+          <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm font-medium text-zinc-400 transition-colors hover:bg-[var(--theme-primary-soft)] hover:text-[var(--theme-primary)]">
+            Close
           </button>
         </div>
       </div>
@@ -688,7 +879,9 @@ export function BillsView() {
   const [search, setSearch] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
   const [modal, setModal] = useState<BillFormState>({ mode: "closed" });
+  const [detailsTarget, setDetailsTarget] = useState<SupabaseBill | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SupabaseBill | null>(null);
+  const [payTarget, setPayTarget] = useState<SupabaseBill | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const [payingId, setPayingId] = useState<string | null>(null);
@@ -742,7 +935,7 @@ export function BillsView() {
           "bills",
           supabase
             .from("bills")
-            .select("id,user_id,title,amount,due_date,category_id,wallet_id,status,notes,is_recurring,recurring_id")
+            .select("id,user_id,title,amount,due_date,category_id,wallet_id,status,notes,is_recurring,recurring_id,generated_occurrence_date,bill_id,receipt_url,receipt_path,receipt_file_name,receipt_mime_type,receipt_size")
             .eq("user_id", user.id)
             .eq("is_deleted", false)
             .order("due_date", { ascending: true })
@@ -870,15 +1063,24 @@ export function BillsView() {
     }
   }
 
-  async function handleMarkPaid(bill: SupabaseBill) {
+  async function handleMarkPaid(bill: SupabaseBill, receiptDraft: ReceiptDraft = { file: null, remove: false }) {
     setActionError("");
     setPayingId(bill.id);
     try {
       if (isGuest) {
         await markBillPaid(Number(bill.id), OFFLINE_USER_ID);
+        const receipt = await resolveReceiptMetadata({
+          current: getReceiptMetadata(bill),
+          draft: receiptDraft,
+          isOffline: true,
+          userId: OFFLINE_USER_ID,
+          scope: "bills",
+        });
+        await updateBill(Number(bill.id), receipt);
         setBills((current) =>
-          current.map((item) => item.id === bill.id ? { ...item, status: "paid" } : item)
+          current.map((item) => item.id === bill.id ? { ...item, status: "paid", ...receipt } : item)
         );
+        setPayTarget(null);
         void loadBills(undefined, { silent: true });
         return;
       }
@@ -890,7 +1092,7 @@ export function BillsView() {
       const supabase = createClient();
       const { data: currentBill, error: billReadError } = await supabase
         .from("bills")
-        .select("id,status,amount,title,due_date,wallet_id,category_id")
+        .select("id,status,amount,title,due_date,wallet_id,category_id,receipt_url,receipt_path,receipt_file_name,receipt_mime_type,receipt_size")
         .eq("id", bill.id)
         .eq("user_id", user.id)
         .maybeSingle();
@@ -939,9 +1141,17 @@ export function BillsView() {
         return;
       }
 
+      const receipt = await resolveReceiptMetadata({
+        current: getReceiptMetadata(bill),
+        draft: receiptDraft,
+        isOffline: false,
+        userId: user.id,
+        scope: "bills",
+      });
+
       const { error: billUpdateError } = await supabase
         .from("bills")
-        .update({ status: "paid" })
+        .update({ status: "paid", ...receipt })
         .eq("id", bill.id)
         .eq("user_id", user.id);
 
@@ -951,8 +1161,9 @@ export function BillsView() {
       }
 
       setBills((current) =>
-        current.map((item) => item.id === bill.id ? { ...item, status: "paid" } : item)
+        current.map((item) => item.id === bill.id ? { ...item, status: "paid", ...receipt } : item)
       );
+      setPayTarget(null);
       void loadBills(undefined, { silent: true });
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "Failed to mark bill as paid.");
@@ -1055,9 +1266,10 @@ export function BillsView() {
                     bill={bill}
                     category={bill.category_id ? categoryMap.get(bill.category_id) : undefined}
                     wallet={bill.wallet_id ? walletMap.get(bill.wallet_id) : undefined}
+                    onOpen={() => setDetailsTarget(bill)}
                     onEdit={() => setModal({ mode: "edit", bill })}
                     onDelete={() => setDeleteTarget(bill)}
-                    onPaid={() => handleMarkPaid(bill)}
+                    onPaid={() => setPayTarget(bill)}
                     paying={payingId === bill.id}
                     formatCurrency={formatCurrency}
                   />
@@ -1087,6 +1299,38 @@ export function BillsView() {
         value={filter}
         onChange={setFilter}
         onClose={() => setFilterOpen(false)}
+      />
+
+      <BillDetailsModal
+        bill={detailsTarget}
+        category={detailsTarget?.category_id ? categoryMap.get(detailsTarget.category_id) : undefined}
+        wallet={detailsTarget?.wallet_id ? walletMap.get(detailsTarget.wallet_id) : undefined}
+        onClose={() => setDetailsTarget(null)}
+        onEdit={() => {
+          if (!detailsTarget) return;
+          setModal({ mode: "edit", bill: detailsTarget });
+          setDetailsTarget(null);
+        }}
+        onDelete={() => {
+          if (!detailsTarget) return;
+          setDeleteTarget(detailsTarget);
+          setDetailsTarget(null);
+        }}
+      />
+
+      <MarkPaidModal
+        bill={payTarget}
+        paying={payingId === payTarget?.id}
+        error={actionError}
+        onClose={() => {
+          if (!payingId) {
+            setActionError("");
+            setPayTarget(null);
+          }
+        }}
+        onConfirm={(draft) => {
+          if (payTarget) void handleMarkPaid(payTarget, draft);
+        }}
       />
 
       {deleteTarget && (

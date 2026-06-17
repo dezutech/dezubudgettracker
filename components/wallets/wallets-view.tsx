@@ -6,8 +6,11 @@ import {
   ArrowLeftRight,
   Banknote,
   Building2,
+  Copy,
   CreditCard,
+  Eye,
   Plus,
+  QrCode,
   ShoppingBag,
   Smartphone,
   Upload,
@@ -47,9 +50,11 @@ const WALLET_TYPES: WalletType[] = [
 ];
 
 const WALLET_ICONS = ["Bank Account", "Cash", "E-Wallet", "Credit Card", "BNPL", "wallet"];
-const LOGO_BUCKET = "wallet-logos";
+const WALLET_ASSETS_BUCKET = "wallet-assets";
 const MAX_LOGO_SIZE = 2 * 1024 * 1024;
 const ACCEPTED_LOGO_TYPES = ["image/png", "image/jpeg", "image/webp", "image/svg+xml"];
+const MAX_QR_SIZE = 5 * 1024 * 1024;
+const ACCEPTED_QR_TYPES = ["image/png", "image/jpeg", "image/webp"];
 const COLOR_SWATCHES: Array<{ label: WalletColor; value: string }> = [
   { label: "sky", value: "#38bdf8" },
   { label: "amber", value: "#fbbf24" },
@@ -63,6 +68,11 @@ type LogoSelection = {
   file: File | null;
   previewUrl: string;
   extractedColor: string | null;
+};
+type QrSelection = {
+  file: File | null;
+  previewUrl: string;
+  remove: boolean;
 };
 
 function normalizeWalletType(type: string): WalletType {
@@ -107,6 +117,16 @@ function validateLogoFile(file: File) {
   }
   if (file.size > MAX_LOGO_SIZE) {
     return "Logo must be 2MB or smaller.";
+  }
+  return "";
+}
+
+function validateQrFile(file: File) {
+  if (!ACCEPTED_QR_TYPES.includes(file.type)) {
+    return "Upload a JPG, PNG, or WebP QR image.";
+  }
+  if (file.size > MAX_QR_SIZE) {
+    return "QR image must be 5MB or smaller.";
   }
   return "";
 }
@@ -187,15 +207,66 @@ async function prepareLogoFile(file: File): Promise<LogoSelection> {
 
 async function uploadWalletLogo(userId: string, file: File) {
   const supabase = createClient();
-  const path = `${userId}/${crypto.randomUUID()}.${extensionForFile(file)}`;
-  const { error } = await supabase.storage.from(LOGO_BUCKET).upload(path, file, {
+  const path = `${userId}/logos/${crypto.randomUUID()}.${extensionForFile(file)}`;
+  const { error } = await supabase.storage.from(WALLET_ASSETS_BUCKET).upload(path, file, {
     cacheControl: "3600",
     contentType: file.type,
     upsert: false,
   });
   if (error) throw new Error(error.message);
-  const { data } = supabase.storage.from(LOGO_BUCKET).getPublicUrl(path);
-  return data.publicUrl;
+  const { data, error: signedError } = await supabase.storage.from(WALLET_ASSETS_BUCKET).createSignedUrl(path, 60 * 60 * 24 * 7);
+  if (signedError) throw new Error(signedError.message);
+  return { logo_url: data.signedUrl, logo_path: path };
+}
+
+async function uploadWalletQr(userId: string, file: File) {
+  const validationError = validateQrFile(file);
+  if (validationError) throw new Error(validationError);
+  const supabase = createClient();
+  const path = `${userId}/qr/${crypto.randomUUID()}.${extensionForFile(file)}`;
+  const { error } = await supabase.storage.from(WALLET_ASSETS_BUCKET).upload(path, file, {
+    cacheControl: "3600",
+    contentType: file.type,
+    upsert: false,
+  });
+  if (error) {
+    throw new Error(error.message.toLowerCase().includes("bucket not found")
+      ? "Wallet asset storage is not configured. Please create the wallet-assets bucket in Supabase."
+      : error.message);
+  }
+  const { data, error: signedError } = await supabase.storage.from(WALLET_ASSETS_BUCKET).createSignedUrl(path, 60 * 60 * 24 * 7);
+  if (signedError) throw new Error(signedError.message);
+  return {
+    qr_code_url: data.signedUrl,
+    qr_code_path: path,
+    qr_code_file_name: file.name,
+    qr_code_mime_type: file.type,
+    qr_code_size: file.size,
+  };
+}
+
+async function removeWalletAsset(path?: string | null) {
+  if (!path) return;
+  const supabase = createClient();
+  await supabase.storage.from(WALLET_ASSETS_BUCKET).remove([path]);
+}
+
+async function signedWalletAssetUrl(path?: string | null) {
+  if (!path) return null;
+  const supabase = createClient();
+  const { data, error } = await supabase.storage.from(WALLET_ASSETS_BUCKET).createSignedUrl(path, 60 * 60 * 24 * 7);
+  if (error) return null;
+  return data.signedUrl;
+}
+
+async function prepareQrFile(file: File): Promise<QrSelection> {
+  const validationError = validateQrFile(file);
+  if (validationError) throw new Error(validationError);
+  return { file, previewUrl: await fileToDataUrl(file), remove: false };
+}
+
+function hasAccountDetails(wallet: WalletDisplay | null) {
+  return Boolean(wallet?.account_name || wallet?.account_number || wallet?.bank_name || wallet?.mobile_number || wallet?.qr_code_url);
 }
 
 function colorToHex(color: string | null | undefined, fallback: WalletColor = "emerald") {
@@ -336,7 +407,7 @@ function WalletLogoControls({
             {extractedColor && (
               <p className="mt-1 text-[11px] text-muted-foreground">
                 Auto color: <span className="font-semibold" style={{ color: extractedColor }}>{extractedColor}</span>
-                {manualColor ? " · manual override active" : ""}
+                {manualColor ? " - manual override active" : ""}
               </p>
             )}
           </div>
@@ -362,7 +433,7 @@ function WalletLogoControls({
               key={item.label}
               type="button"
               onClick={() => onColorChange(item.label, true)}
-              className={cn("h-8 rounded-lg px-3 text-xs font-medium capitalize transition-colors ring-1", color === item.label ? "text-zinc-950 ring-white/20" : "text-muted-foreground ring-border hover:ring-ring/40")}
+              className={cn("h-8 rounded-lg px-3 text-xs font-medium capitalize transition-colors ring-1", color === item.label ? "text-[var(--theme-primary-foreground)] ring-border" : "text-muted-foreground ring-border hover:ring-ring/40")}
               style={{ backgroundColor: color === item.label ? item.value : `${item.value}22` }}
             >
               {item.label}
@@ -372,7 +443,7 @@ function WalletLogoControls({
             <button
               type="button"
               onClick={() => onColorChange(extractedColor, false)}
-              className={cn("h-8 rounded-lg px-3 text-xs font-semibold ring-1", color === extractedColor ? "text-zinc-950 ring-white/20" : "text-muted-foreground ring-border")}
+              className={cn("h-8 rounded-lg px-3 text-xs font-semibold ring-1", color === extractedColor ? "text-[var(--theme-primary-foreground)] ring-border" : "text-muted-foreground ring-border")}
               style={{ backgroundColor: color === extractedColor ? extractedColor : `${extractedColor}24` }}
             >
               Auto
@@ -384,6 +455,110 @@ function WalletLogoControls({
       {logoError && (
         <p className="rounded-lg bg-rose-500/10 px-3 py-2 text-xs text-rose-400">{logoError}</p>
       )}
+    </div>
+  );
+}
+
+function WalletAccountFields({
+  type,
+  accountName,
+  accountNumber,
+  bankName,
+  mobileNumber,
+  onAccountNameChange,
+  onAccountNumberChange,
+  onBankNameChange,
+  onMobileNumberChange,
+}: {
+  type: WalletType;
+  accountName: string;
+  accountNumber: string;
+  bankName: string;
+  mobileNumber: string;
+  onAccountNameChange: (value: string) => void;
+  onAccountNumberChange: (value: string) => void;
+  onBankNameChange: (value: string) => void;
+  onMobileNumberChange: (value: string) => void;
+}) {
+  const showBank = type === "Bank Account";
+  const showEWallet = type === "E-Wallet";
+  if (!showBank && !showEWallet) return null;
+
+  return (
+    <div className="rounded-xl border border-border bg-card/80 p-3 text-card-foreground">
+      <p className="text-xs font-semibold text-card-foreground">{showBank ? "Bank / Account Details" : "E-Wallet Details"}</p>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <div className="flex flex-col gap-1.5 sm:col-span-2">
+          <label className="text-xs font-medium text-muted-foreground">Account Name</label>
+          <Input value={accountName} onChange={(event) => onAccountNameChange(event.target.value)} placeholder="Optional" className="h-9 border-border bg-[var(--theme-card)] text-foreground" />
+        </div>
+        {showBank && (
+          <>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium text-muted-foreground">Account Number</label>
+              <Input value={accountNumber} onChange={(event) => onAccountNumberChange(event.target.value)} placeholder="Optional" className="h-9 border-border bg-[var(--theme-card)] text-foreground" />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium text-muted-foreground">Bank Name</label>
+              <Input value={bankName} onChange={(event) => onBankNameChange(event.target.value)} placeholder="Optional" className="h-9 border-border bg-[var(--theme-card)] text-foreground" />
+            </div>
+          </>
+        )}
+        {showEWallet && (
+          <div className="flex flex-col gap-1.5 sm:col-span-2">
+            <label className="text-xs font-medium text-muted-foreground">Mobile Number</label>
+            <Input value={mobileNumber} onChange={(event) => onMobileNumberChange(event.target.value)} placeholder="Optional" className="h-9 border-border bg-[var(--theme-card)] text-foreground" />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function WalletQrControls({
+  selection,
+  error,
+  onFile,
+  onRemove,
+}: {
+  selection: QrSelection;
+  error: string;
+  onFile: (file: File) => void;
+  onRemove: () => void;
+}) {
+  const inputId = useId();
+  return (
+    <div className="rounded-xl border border-border bg-card/80 p-3 text-card-foreground">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <QrCode size={14} className="text-muted-foreground" />
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-card-foreground">QR Code</p>
+            <p className="text-[11px] text-muted-foreground">JPG, PNG, or WebP up to 5MB</p>
+          </div>
+        </div>
+        <label htmlFor={inputId} className="theme-hover flex h-8 cursor-pointer items-center gap-1.5 rounded-lg bg-[var(--theme-card)] px-2.5 text-xs font-medium text-foreground ring-1 ring-border transition-colors">
+          <Upload size={13} />
+          {selection.previewUrl ? "Replace" : "Upload"}
+        </label>
+      </div>
+      <input id={inputId} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(event) => {
+        const file = event.target.files?.[0];
+        if (file) onFile(file);
+        event.currentTarget.value = "";
+      }} />
+      {selection.previewUrl && (
+        <div className="mt-3 flex items-center gap-3">
+          <button type="button" onClick={() => window.open(selection.previewUrl, "_blank", "noopener,noreferrer")} className="h-16 w-16 overflow-hidden rounded-lg bg-[var(--theme-card)] ring-1 ring-border">
+            <img src={selection.previewUrl} alt="Wallet QR preview" className="h-full w-full object-cover" />
+          </button>
+          <button type="button" onClick={onRemove} className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive/10">
+            <Trash2 size={13} />
+            Remove QR
+          </button>
+        </div>
+      )}
+      {error && <p className="mt-2 rounded-lg bg-rose-500/10 px-3 py-2 text-xs text-rose-400">{error}</p>}
     </div>
   );
 }
@@ -414,6 +589,12 @@ function AddWalletModal({
   const [logoMode, setLogoMode] = useState<LogoMode>("icon");
   const [logoSelection, setLogoSelection] = useState<LogoSelection>({ file: null, previewUrl: "", extractedColor: null });
   const [logoError, setLogoError] = useState("");
+  const [accountName, setAccountName] = useState("");
+  const [accountNumber, setAccountNumber] = useState("");
+  const [bankName, setBankName] = useState("");
+  const [mobileNumber, setMobileNumber] = useState("");
+  const [qrSelection, setQrSelection] = useState<QrSelection>({ file: null, previewUrl: "", remove: false });
+  const [qrError, setQrError] = useState("");
   const [saving, setSaving]   = useState(false);
   const [error, setError]     = useState("");
 
@@ -423,7 +604,9 @@ function AddWalletModal({
     setName(""); setType("Bank Account");
     setBalance(""); setLimit(""); setIcon("Bank Account"); setColor(TYPE_COLOR["Bank Account"]);
     setManualColor(false); setLogoMode("icon"); setLogoSelection({ file: null, previewUrl: "", extractedColor: null });
-    setLogoError(""); setError("");
+    setAccountName(""); setAccountNumber(""); setBankName(""); setMobileNumber("");
+    setQrSelection({ file: null, previewUrl: "", remove: false });
+    setLogoError(""); setQrError(""); setError("");
   }
 
   function handleClose() { reset(); onClose(); }
@@ -444,6 +627,16 @@ function AddWalletModal({
     } catch (uploadError) {
       setLogoSelection({ file: null, previewUrl: "", extractedColor: null });
       setLogoError(uploadError instanceof Error ? uploadError.message : "Could not use this logo.");
+    }
+  }
+
+  async function handleQrFile(file: File) {
+    setQrError("");
+    try {
+      setQrSelection(await prepareQrFile(file));
+    } catch (uploadError) {
+      setQrSelection({ file: null, previewUrl: "", remove: false });
+      setQrError(uploadError instanceof Error ? uploadError.message : "Could not use this QR image.");
     }
   }
 
@@ -469,6 +662,7 @@ function AddWalletModal({
     setSaving(true);
     try {
       if (isOffline) {
+        const qrCodeUrl = qrSelection.file ? qrSelection.previewUrl : undefined;
         await createWallet({
           userId: OFFLINE_USER_ID,
           name: name.trim(),
@@ -479,6 +673,14 @@ function AddWalletModal({
           icon,
           color,
           logoUrl: logoMode === "logo" ? logoSelection.previewUrl || undefined : undefined,
+          accountName: accountName.trim() || null,
+          accountNumber: accountNumber.trim() || null,
+          bankName: bankName.trim() || null,
+          mobileNumber: mobileNumber.trim() || null,
+          qrCodeUrl,
+          qrCodeFileName: qrSelection.file?.name ?? null,
+          qrCodeMimeType: qrSelection.file?.type ?? null,
+          qrCodeSize: qrSelection.file?.size ?? null,
           isArchived: false,
         });
         reset();
@@ -493,9 +695,16 @@ function AddWalletModal({
       }
 
       const supabase = createClient();
-      const logoUrl = logoMode === "logo" && logoSelection.file
+      const logo = logoMode === "logo" && logoSelection.file
         ? await uploadWalletLogo(userId, logoSelection.file)
-        : null;
+        : { logo_url: null, logo_path: null };
+      const qr = qrSelection.file ? await uploadWalletQr(userId, qrSelection.file) : {
+        qr_code_url: null,
+        qr_code_path: null,
+        qr_code_file_name: null,
+        qr_code_mime_type: null,
+        qr_code_size: null,
+      };
       const { error: insertError } = await supabase.from("wallets").insert({
         user_id: userId,
         name:       name.trim(),
@@ -504,7 +713,12 @@ function AddWalletModal({
         credit_limit: isDebtType ? Number(limit) : null,
         color,
         icon,
-        logo_url:   logoUrl,
+        ...logo,
+        account_name: accountName.trim() || null,
+        account_number: accountNumber.trim() || null,
+        bank_name: bankName.trim() || null,
+        mobile_number: mobileNumber.trim() || null,
+        ...qr,
       });
 
       if (insertError) {
@@ -640,6 +854,28 @@ function AddWalletModal({
             }}
           />
 
+          <WalletAccountFields
+            type={type}
+            accountName={accountName}
+            accountNumber={accountNumber}
+            bankName={bankName}
+            mobileNumber={mobileNumber}
+            onAccountNameChange={setAccountName}
+            onAccountNumberChange={setAccountNumber}
+            onBankNameChange={setBankName}
+            onMobileNumberChange={setMobileNumber}
+          />
+
+          <WalletQrControls
+            selection={qrSelection}
+            error={qrError}
+            onFile={(file) => void handleQrFile(file)}
+            onRemove={() => {
+              setQrSelection({ file: null, previewUrl: "", remove: false });
+              setQrError("");
+            }}
+          />
+
           {error && (
             <p className="text-xs text-rose-400 bg-rose-500/10 rounded-lg px-3 py-2">{error}</p>
           )}
@@ -693,6 +929,12 @@ function EditWalletModal({
   const [logoSelection, setLogoSelection] = useState<LogoSelection>({ file: null, previewUrl: "", extractedColor: null });
   const [logoUrl, setLogoUrl] = useState("");
   const [logoError, setLogoError] = useState("");
+  const [accountName, setAccountName] = useState("");
+  const [accountNumber, setAccountNumber] = useState("");
+  const [bankName, setBankName] = useState("");
+  const [mobileNumber, setMobileNumber] = useState("");
+  const [qrSelection, setQrSelection] = useState<QrSelection>({ file: null, previewUrl: "", remove: false });
+  const [qrError, setQrError] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -710,8 +952,14 @@ function EditWalletModal({
       setLogoMode(wallet.logo_url ? "logo" : "icon");
       setLogoSelection({ file: null, previewUrl: wallet.logo_url ?? "", extractedColor: null });
       setLogoUrl(wallet.logo_url ?? "");
+      setAccountName(wallet.account_name ?? "");
+      setAccountNumber(wallet.account_number ?? "");
+      setBankName(wallet.bank_name ?? "");
+      setMobileNumber(wallet.mobile_number ?? "");
+      setQrSelection({ file: null, previewUrl: wallet.qr_code_url ?? "", remove: false });
       setManualColor(Boolean(wallet.color));
       setLogoError("");
+      setQrError("");
       setError("");
     });
   }, [wallet]);
@@ -731,6 +979,15 @@ function EditWalletModal({
       if (nextLogo.extractedColor && !manualColor) setColor(nextLogo.extractedColor);
     } catch (uploadError) {
       setLogoError(uploadError instanceof Error ? uploadError.message : "Could not use this logo.");
+    }
+  }
+
+  async function handleQrFile(file: File) {
+    setQrError("");
+    try {
+      setQrSelection(await prepareQrFile(file));
+    } catch (uploadError) {
+      setQrError(uploadError instanceof Error ? uploadError.message : "Could not use this QR image.");
     }
   }
 
@@ -756,6 +1013,13 @@ function EditWalletModal({
         const nextLogoUrl = logoMode === "logo"
           ? logoSelection.previewUrl || logoUrl || undefined
           : undefined;
+        const qrPatch = {
+          qrCodeUrl: qrSelection.remove ? null : (qrSelection.previewUrl || wallet.qr_code_url || null),
+          qrCodePath: null,
+          qrCodeFileName: qrSelection.file?.name ?? (qrSelection.remove ? null : wallet.qr_code_file_name ?? null),
+          qrCodeMimeType: qrSelection.file?.type ?? (qrSelection.remove ? null : wallet.qr_code_mime_type ?? null),
+          qrCodeSize: qrSelection.file?.size ?? (qrSelection.remove ? null : wallet.qr_code_size ?? null),
+        };
         await updateWallet(Number(wallet.id), {
           name: name.trim(),
           type,
@@ -764,20 +1028,75 @@ function EditWalletModal({
           color,
           icon,
           logoUrl: nextLogoUrl,
+          accountName: accountName.trim() || null,
+          accountNumber: accountNumber.trim() || null,
+          bankName: bankName.trim() || null,
+          mobileNumber: mobileNumber.trim() || null,
+          ...qrPatch,
         });
-        onSaved({ ...wallet, name: name.trim(), type, balance: nextBalance, limit: nextLimit ?? undefined, color, icon, logo_url: nextLogoUrl ?? null });
+        onSaved({
+          ...wallet,
+          name: name.trim(),
+          type,
+          balance: nextBalance,
+          limit: nextLimit ?? undefined,
+          color,
+          icon,
+          logo_url: nextLogoUrl ?? null,
+          account_name: accountName.trim() || null,
+          account_number: accountNumber.trim() || null,
+          bank_name: bankName.trim() || null,
+          mobile_number: mobileNumber.trim() || null,
+          qr_code_url: qrPatch.qrCodeUrl,
+          qr_code_path: qrPatch.qrCodePath,
+          qr_code_file_name: qrPatch.qrCodeFileName,
+          qr_code_mime_type: qrPatch.qrCodeMimeType,
+          qr_code_size: qrPatch.qrCodeSize,
+        });
         onClose();
         return;
       }
 
       if (!userId) { setError("Please sign in to edit a wallet."); return; }
       const supabase = createClient();
-      const nextLogoUrl = logoMode === "logo"
-        ? logoSelection.file
-          ? await uploadWalletLogo(userId, logoSelection.file)
-          : logoUrl || null
-        : null;
-      const payload = { name: name.trim(), type, balance: nextBalance, credit_limit: nextLimit, color, icon, logo_url: nextLogoUrl };
+      let logoPayload = {
+        logo_url: logoMode === "logo" ? logoUrl || null : null,
+        logo_path: logoMode === "logo" ? wallet.logo_path ?? null : null,
+      };
+      if (logoMode === "logo" && logoSelection.file) {
+        await removeWalletAsset(wallet.logo_path);
+        logoPayload = await uploadWalletLogo(userId, logoSelection.file);
+      } else if (logoMode === "icon") {
+        await removeWalletAsset(wallet.logo_path);
+      }
+      let qr = {
+        qr_code_url: wallet.qr_code_url ?? null,
+        qr_code_path: wallet.qr_code_path ?? null,
+        qr_code_file_name: wallet.qr_code_file_name ?? null,
+        qr_code_mime_type: wallet.qr_code_mime_type ?? null,
+        qr_code_size: wallet.qr_code_size ?? null,
+      };
+      if (qrSelection.remove) {
+        await removeWalletAsset(wallet.qr_code_path);
+        qr = { qr_code_url: null, qr_code_path: null, qr_code_file_name: null, qr_code_mime_type: null, qr_code_size: null };
+      } else if (qrSelection.file) {
+        await removeWalletAsset(wallet.qr_code_path);
+        qr = await uploadWalletQr(userId, qrSelection.file);
+      }
+      const payload = {
+        name: name.trim(),
+        type,
+        balance: nextBalance,
+        credit_limit: nextLimit,
+        color,
+        icon,
+        ...logoPayload,
+        account_name: accountName.trim() || null,
+        account_number: accountNumber.trim() || null,
+        bank_name: bankName.trim() || null,
+        mobile_number: mobileNumber.trim() || null,
+        ...qr,
+      };
       const { error: updateError } = await loggedSupabase(
         "wallets update",
         supabase
@@ -877,6 +1196,26 @@ function EditWalletModal({
               setLogoError("");
             }}
           />
+          <WalletAccountFields
+            type={type}
+            accountName={accountName}
+            accountNumber={accountNumber}
+            bankName={bankName}
+            mobileNumber={mobileNumber}
+            onAccountNameChange={setAccountName}
+            onAccountNumberChange={setAccountNumber}
+            onBankNameChange={setBankName}
+            onMobileNumberChange={setMobileNumber}
+          />
+          <WalletQrControls
+            selection={qrSelection}
+            error={qrError}
+            onFile={(file) => void handleQrFile(file)}
+            onRemove={() => {
+              setQrSelection({ file: null, previewUrl: "", remove: Boolean(wallet.qr_code_url || wallet.qr_code_path) });
+              setQrError("");
+            }}
+          />
           {error && <p className="text-xs text-rose-400 bg-rose-500/10 rounded-lg px-3 py-2">{error}</p>}
         </div>
         <div className="dezu-modal-footer flex items-center justify-end gap-2 border-t border-zinc-800 px-5 py-4">
@@ -924,6 +1263,126 @@ function DeleteWalletModal({
           <button onClick={onConfirm} disabled={deleting} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold bg-rose-500 hover:bg-rose-400 text-[var(--theme-danger-foreground)] transition-colors disabled:opacity-60 disabled:pointer-events-none">
             {deleting && <Loader2 size={13} className="animate-spin" />}
             Delete
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WalletDetailsModal({
+  wallet,
+  onClose,
+  onEdit,
+}: {
+  wallet: WalletDisplay | null;
+  onClose: () => void;
+  onEdit: () => void;
+}) {
+  const { formatCurrency } = useCurrency();
+  const [copied, setCopied] = useState("");
+  if (!wallet) return null;
+  const normalizedType = normalizeWalletType(wallet.type);
+  const showBank = normalizedType === "Bank Account";
+  const showEWallet = normalizedType === "E-Wallet";
+  const detailsAvailable = hasAccountDetails(wallet);
+
+  async function copyValue(label: string, value?: string | null) {
+    if (!value) return;
+    await navigator.clipboard.writeText(value);
+    setCopied(label);
+    window.setTimeout(() => setCopied(""), 1800);
+  }
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-3 sm:p-4">
+      <div className="absolute inset-0 theme-overlay backdrop-blur-sm" onClick={onClose} />
+      <div className="dezu-modal-panel relative flex max-h-[85dvh] w-full flex-col overflow-hidden rounded-2xl bg-zinc-900 shadow-2xl ring-1 ring-white/10 sm:max-w-lg">
+        <div className="dezu-modal-header flex shrink-0 items-start justify-between gap-4 border-b border-zinc-800 px-5 py-4">
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-zinc-500">Wallet Details</p>
+            <h2 className="mt-1 truncate text-lg font-semibold text-zinc-50">{wallet.name}</h2>
+          </div>
+          <button onClick={onClose} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-[var(--theme-primary-soft)] hover:text-[var(--theme-primary)]">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="dezu-modal-body min-h-0 flex-1 overflow-y-auto px-5 py-5">
+          <div className="mb-4 rounded-xl bg-card/80 px-3 py-3 ring-1 ring-border">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Balance</p>
+            <p className="mt-1 text-xl font-bold tabular-nums text-card-foreground">{formatCurrency(wallet.balance)}</p>
+          </div>
+
+          {!detailsAvailable && (
+            <div className="rounded-xl bg-card/80 px-3 py-3 text-sm text-muted-foreground ring-1 ring-border">
+              No account details saved.
+            </div>
+          )}
+
+          {detailsAvailable && (
+            <div className="space-y-3">
+              {(showBank || showEWallet) && wallet.account_name && (
+                <div className="rounded-xl bg-card/80 px-3 py-2.5 ring-1 ring-border">
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Account Name</p>
+                  <p className="mt-1 break-words text-sm font-medium text-card-foreground">{wallet.account_name}</p>
+                </div>
+              )}
+              {showBank && wallet.bank_name && (
+                <div className="rounded-xl bg-card/80 px-3 py-2.5 ring-1 ring-border">
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Bank Name</p>
+                  <p className="mt-1 break-words text-sm font-medium text-card-foreground">{wallet.bank_name}</p>
+                </div>
+              )}
+              {showBank && wallet.account_number && (
+                <div className="rounded-xl bg-card/80 px-3 py-2.5 ring-1 ring-border">
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Account Number</p>
+                  <div className="mt-1 flex items-center justify-between gap-2">
+                    <p className="break-all text-sm font-medium text-card-foreground">{wallet.account_number}</p>
+                    <button onClick={() => void copyValue("Account number", wallet.account_number)} className="theme-hover flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-[var(--theme-card)] px-2.5 text-xs font-medium text-foreground ring-1 ring-border transition-colors">
+                      <Copy size={12} />
+                      Copy
+                    </button>
+                  </div>
+                </div>
+              )}
+              {showEWallet && wallet.mobile_number && (
+                <div className="rounded-xl bg-card/80 px-3 py-2.5 ring-1 ring-border">
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Mobile Number</p>
+                  <div className="mt-1 flex items-center justify-between gap-2">
+                    <p className="break-all text-sm font-medium text-card-foreground">{wallet.mobile_number}</p>
+                    <button onClick={() => void copyValue("Mobile number", wallet.mobile_number)} className="theme-hover flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-[var(--theme-card)] px-2.5 text-xs font-medium text-foreground ring-1 ring-border transition-colors">
+                      <Copy size={12} />
+                      Copy
+                    </button>
+                  </div>
+                </div>
+              )}
+              {wallet.qr_code_url && (
+                <div className="rounded-xl bg-card/80 px-3 py-3 ring-1 ring-border">
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">QR Code</p>
+                  <div className="mt-2 flex items-center gap-3">
+                    <button onClick={() => window.open(wallet.qr_code_url ?? "", "_blank", "noopener,noreferrer")} className="h-24 w-24 overflow-hidden rounded-xl bg-[var(--theme-card)] ring-1 ring-border">
+                      <img src={wallet.qr_code_url} alt={`${wallet.name} QR code`} className="h-full w-full object-cover" />
+                    </button>
+                    <button onClick={() => window.open(wallet.qr_code_url ?? "", "_blank", "noopener,noreferrer")} className="theme-hover flex h-9 items-center gap-1.5 rounded-lg bg-[var(--theme-card)] px-3 text-xs font-medium text-foreground ring-1 ring-border transition-colors">
+                      <Eye size={13} />
+                      View QR Code
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          {copied && <p className="mt-3 rounded-lg bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300">{copied} copied</p>}
+        </div>
+
+        <div className="dezu-modal-footer flex shrink-0 justify-end gap-2 border-t border-zinc-800 px-5 py-4">
+          <button onClick={onEdit} className="rounded-lg px-4 py-2 text-sm font-medium text-zinc-300 transition-colors hover:bg-[var(--theme-primary-soft)] hover:text-[var(--theme-primary)]">
+            Edit Wallet
+          </button>
+          <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm font-medium text-zinc-400 transition-colors hover:bg-[var(--theme-primary-soft)] hover:text-[var(--theme-primary)]">
+            Close
           </button>
         </div>
       </div>
@@ -1191,6 +1650,7 @@ export function WalletsView() {
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferSourceId, setTransferSourceId] = useState<string | null>(null);
   const [toast, setToast] = useState("");
+  const [detailsTarget, setDetailsTarget] = useState<WalletDisplay | null>(null);
   const [editTarget, setEditTarget] = useState<WalletDisplay | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<WalletDisplay | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -1221,6 +1681,16 @@ export function WalletsView() {
           limit: wallet.limit ?? undefined,
           icon: wallet.icon,
           logo_url: wallet.logoUrl ?? null,
+          logo_path: wallet.logoPath ?? null,
+          account_name: wallet.accountName ?? null,
+          account_number: wallet.accountNumber ?? null,
+          bank_name: wallet.bankName ?? null,
+          mobile_number: wallet.mobileNumber ?? null,
+          qr_code_url: wallet.qrCodeUrl ?? null,
+          qr_code_path: wallet.qrCodePath ?? null,
+          qr_code_file_name: wallet.qrCodeFileName ?? null,
+          qr_code_mime_type: wallet.qrCodeMimeType ?? null,
+          qr_code_size: wallet.qrCodeSize ?? null,
           currency: wallet.currency,
         })));
         return;
@@ -1235,7 +1705,7 @@ export function WalletsView() {
         "wallets",
           supabase
             .from("wallets")
-            .select("id,name,type,balance,credit_limit,color,icon,logo_url,created_at")
+            .select("id,name,type,balance,credit_limit,color,icon,logo_url,logo_path,account_name,account_number,bank_name,mobile_number,qr_code_url,qr_code_path,qr_code_file_name,qr_code_mime_type,qr_code_size,created_at")
             .eq("user_id", userId)
             .eq("is_deleted", false)
           .order("created_at", { ascending: true })
@@ -1250,7 +1720,7 @@ export function WalletsView() {
       }
 
       setWallets(
-        (data ?? []).map((wallet) => ({
+        await Promise.all((data ?? []).map(async (wallet) => ({
           id: wallet.id,
           name: wallet.name,
           type: normalizeWalletType(wallet.type),
@@ -1258,9 +1728,19 @@ export function WalletsView() {
           limit: wallet.credit_limit != null ? Number(wallet.credit_limit) : undefined,
           color: wallet.color,
           icon: wallet.icon,
-          logo_url: wallet.logo_url,
+          logo_url: wallet.logo_path ? await signedWalletAssetUrl(wallet.logo_path) : wallet.logo_url,
+          logo_path: wallet.logo_path,
+          account_name: wallet.account_name,
+          account_number: wallet.account_number,
+          bank_name: wallet.bank_name,
+          mobile_number: wallet.mobile_number,
+          qr_code_url: wallet.qr_code_path ? await signedWalletAssetUrl(wallet.qr_code_path) : wallet.qr_code_url,
+          qr_code_path: wallet.qr_code_path,
+          qr_code_file_name: wallet.qr_code_file_name,
+          qr_code_mime_type: wallet.qr_code_mime_type,
+          qr_code_size: wallet.qr_code_size,
           currency,
-        }))
+        })))
       );
     } catch (error) {
       if (!isCurrent()) return;
@@ -1452,6 +1932,7 @@ export function WalletsView() {
                       txCount={0}
                       monthlyIncome={0}
                       monthlyExpenses={0}
+                      onOpen={() => setDetailsTarget(wallet)}
                       onEdit={() => setEditTarget(wallet)}
                       onDelete={() => setDeleteTarget(wallet)}
                       onTransfer={() => {
@@ -1494,6 +1975,15 @@ export function WalletsView() {
         isOffline={isGuest}
         onClose={() => setEditTarget(null)}
         onSaved={handleWalletSaved}
+      />
+      <WalletDetailsModal
+        wallet={detailsTarget}
+        onClose={() => setDetailsTarget(null)}
+        onEdit={() => {
+          if (!detailsTarget) return;
+          setEditTarget(detailsTarget);
+          setDetailsTarget(null);
+        }}
       />
       <DeleteWalletModal
         wallet={deleteTarget}

@@ -29,12 +29,14 @@ import { cn } from "@/lib/utils";
 import {
   createRecurring,
   deleteRecurring,
+  getBills,
   getCategories,
   getRecurringTransactions,
   getWallets,
   setRecurringStatus,
   updateRecurring,
   type DbCategory,
+  type DbBill,
   type DbRecurringTransaction,
   type DbWallet,
 } from "@/lib/db";
@@ -46,6 +48,15 @@ type RecurringFrequency = "daily" | "weekly" | "monthly" | "yearly";
 type RecurringType = "income" | "expense";
 type RecurringStatus = "active" | "paused" | "completed";
 type RecurringEndCondition = "forever" | "end_date" | "occurrences";
+type GeneratedBillStatus = "unpaid" | "paid" | "overdue" | "scheduled";
+
+type LinkedGeneratedBill = {
+  id: string;
+  recurringId: string;
+  occurrenceDate: string;
+  dueDate: string;
+  status: GeneratedBillStatus;
+};
 
 type SupabaseWallet = {
   id: string;
@@ -68,6 +79,14 @@ type SupabaseRecurringRow = {
   end_date: string | null;
   max_occurrences: number | null;
   occurrences_count: number | null;
+};
+
+type SupabaseGeneratedBillRow = {
+  id: string;
+  recurring_id: string | null;
+  generated_occurrence_date?: string | null;
+  due_date: string;
+  status: GeneratedBillStatus;
 };
 
 type AppRecurring = {
@@ -129,6 +148,17 @@ function localRecurringToApp(item: DbRecurringTransaction): AppRecurring {
     maxOccurrences: item.maxOccurrences,
     occurrencesCount: item.occurrencesCount ?? 0,
     notes: item.notes,
+  };
+}
+
+function localBillToLinkedGeneratedBill(bill: DbBill): LinkedGeneratedBill | null {
+  if (!bill.isRecurring || bill.recurringId == null) return null;
+  return {
+    id: String(bill.billId ?? bill.id),
+    recurringId: String(bill.recurringId),
+    occurrenceDate: bill.generatedOccurrenceDate ?? bill.dueDate,
+    dueDate: bill.dueDate,
+    status: bill.status,
   };
 }
 
@@ -221,6 +251,14 @@ function formatEndDate(dateStr: string): string {
 }
 
 type DueBadge = { label: string; textClass: string; bgClass: string };
+type PaymentInfo = {
+  statusLabel: string;
+  statusClass: string;
+  dateLabel: string;
+  date: string;
+  isActionable: boolean;
+  isPaidCurrentPeriod: boolean;
+};
 
 function getDueBadge(nextRunDate: string): DueBadge {
   const today = todayIso();
@@ -243,6 +281,60 @@ function getDueBadge(nextRunDate: string): DueBadge {
   const d = new Date(nextRunDate + "T00:00:00");
   const label = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   return { label, textClass: "text-zinc-400", bgClass: "bg-zinc-800" };
+}
+
+function getLinkedGeneratedBill(
+  item: AppRecurring,
+  billMap: Map<string, LinkedGeneratedBill>
+): LinkedGeneratedBill | undefined {
+  return billMap.get(`${item.id}:${item.nextRunDate}`);
+}
+
+function getPaymentInfo(item: AppRecurring, linkedBill?: LinkedGeneratedBill): PaymentInfo {
+  if (linkedBill?.status === "paid") {
+    const nextDueDate = nextOccurrence(item.nextRunDate, item.frequency);
+    return {
+      statusLabel: "Paid this month",
+      statusClass: "bg-emerald-500/10 text-emerald-300",
+      dateLabel: "Next due",
+      date: nextDueDate,
+      isActionable: false,
+      isPaidCurrentPeriod: true,
+    };
+  }
+
+  const dueDate = linkedBill?.dueDate ?? item.nextRunDate;
+  const today = todayIso();
+  if (linkedBill && dueDate < today) {
+    return {
+      statusLabel: "Overdue",
+      statusClass: "bg-rose-500/10 text-rose-300",
+      dateLabel: "Due",
+      date: dueDate,
+      isActionable: true,
+      isPaidCurrentPeriod: false,
+    };
+  }
+  if (linkedBill && dueDate === today) {
+    return {
+      statusLabel: "Due Today",
+      statusClass: "bg-amber-500/10 text-amber-300",
+      dateLabel: "Due",
+      date: dueDate,
+      isActionable: true,
+      isPaidCurrentPeriod: false,
+    };
+  }
+
+  const badge = getDueBadge(dueDate);
+  return {
+    statusLabel: linkedBill ? (linkedBill.status === "scheduled" ? "Scheduled" : badge.label) : "Not generated yet",
+    statusClass: linkedBill ? "bg-sky-500/10 text-sky-300" : "bg-zinc-800 text-zinc-400",
+    dateLabel: "Next due",
+    date: dueDate,
+    isActionable: false,
+    isPaidCurrentPeriod: false,
+  };
 }
 
 // ─── ProgressBadge ────────────────────────────────────────────────────────────
@@ -282,9 +374,11 @@ function ProgressBadge({ item }: { item: AppRecurring }) {
 function UpcomingCard({
   items,
   catMap,
+  billMap,
 }: {
   items: AppRecurring[];
   catMap: Map<string, SupabaseCategory>;
+  billMap: Map<string, LinkedGeneratedBill>;
 }) {
   const { formatCurrency } = useCurrency();
   const dueToday  = items.filter((r) => r.nextRunDate === todayIso());
@@ -311,7 +405,7 @@ function UpcomingCard({
           const cat       = catMap.get(r.categoryId);
           const Icon      = getIcon(cat?.icon ?? "Tag");
           const colorInfo = getColor(cat?.color ?? "zinc");
-          const badge     = getDueBadge(r.nextRunDate);
+          const payment   = getPaymentInfo(r, getLinkedGeneratedBill(r, billMap));
           const freqCfg   = FREQUENCY_CONFIG[r.frequency];
 
           return (
@@ -327,8 +421,8 @@ function UpcomingCard({
                 <p className={`text-sm font-semibold ${r.type === "income" ? "text-emerald-400" : "text-zinc-100"}`}>
                   {r.type === "income" ? "+" : "-"}{formatCurrency(r.amount)}
                 </p>
-                <span className={cn("text-[10px] font-medium px-1.5 py-0.5 rounded", badge.bgClass, badge.textClass)}>
-                  {badge.label}
+                <span className={cn("text-[10px] font-medium px-1.5 py-0.5 rounded", payment.statusClass)}>
+                  {payment.statusLabel}
                 </span>
               </div>
             </div>
@@ -417,6 +511,7 @@ function MobileActionMenu({
 
 function RecurringCard({
   item,
+  linkedBill,
   catMap,
   walMap,
   onEdit,
@@ -426,6 +521,7 @@ function RecurringCard({
   onReactivate,
 }: {
   item: AppRecurring;
+  linkedBill?: LinkedGeneratedBill;
   catMap: Map<string, SupabaseCategory>;
   walMap: Map<string, SupabaseWallet>;
   onEdit: () => void;
@@ -441,7 +537,7 @@ function RecurringCard({
   const colorInfo = getColor(cat?.color ?? "zinc");
   const freqCfg   = FREQUENCY_CONFIG[item.frequency];
   const statusCfg = STATUS_CONFIG[item.status];
-  const badge     = getDueBadge(item.nextRunDate);
+  const payment   = getPaymentInfo(item, linkedBill);
   const isCompleted = item.status === "completed";
   const isActive    = item.status === "active";
 
@@ -491,10 +587,10 @@ function RecurringCard({
         {!isCompleted && (
           <div className="flex items-center gap-1">
             <Calendar size={11} strokeWidth={2} />
-            <span>Next:</span>
-            <span className={cn("font-medium px-1.5 py-0.5 rounded", badge.bgClass, badge.textClass)}>
-              {badge.label}
+            <span className={cn("font-medium px-1.5 py-0.5 rounded", payment.statusClass)}>
+              {payment.statusLabel}
             </span>
+            <span>{payment.dateLabel}: {formatEndDate(payment.date)}</span>
           </div>
         )}
         {isCompleted && (
@@ -1227,6 +1323,7 @@ export function RecurringView() {
   const [deleteError,  setDeleteError]  = useState("");
   const [actioning,    setActioning]    = useState<string | null>(null);
   const [recurring,    setRecurring]    = useState<AppRecurring[]>([]);
+  const [linkedBills,  setLinkedBills]  = useState<LinkedGeneratedBill[]>([]);
   const [categories,   setCategories]   = useState<SupabaseCategory[]>([]);
   const [wallets,      setWallets]      = useState<SupabaseWallet[]>([]);
   const [loading,      setLoading]      = useState(true);
@@ -1246,13 +1343,15 @@ export function RecurringView() {
     try {
       if (authLoading || isLoggingOut) return;
       if (isGuest) {
-        const [localRecurring, localCategories, localWallets] = await Promise.all([
+        const [localRecurring, localCategories, localWallets, localBills] = await Promise.all([
           getRecurringTransactions(OFFLINE_USER_ID),
           getCategories(OFFLINE_USER_ID),
           getWallets(OFFLINE_USER_ID),
+          getBills(OFFLINE_USER_ID),
         ]);
         if (!isCurrent()) return;
         setRecurring(localRecurring.map(localRecurringToApp));
+        setLinkedBills(localBills.map(localBillToLinkedGeneratedBill).filter((bill): bill is LinkedGeneratedBill => Boolean(bill)));
         setCategories(localCategories.map(localCategoryToSupabase));
         setWallets(localWallets.map(localWalletToSupabase));
         return;
@@ -1261,13 +1360,14 @@ export function RecurringView() {
       if (!user?.id) {
         if (!isCurrent()) return;
         setRecurring([]);
+        setLinkedBills([]);
         setCategories([]);
         setWallets([]);
         return;
       }
 
       const supabase = createClient();
-      const [recurringSettled, categoriesSettled, walletSettled] = await Promise.allSettled([
+      const [recurringSettled, categoriesSettled, walletSettled, billsSettled] = await Promise.allSettled([
         loggedSupabase(
           "recurring",
           supabase
@@ -1287,23 +1387,44 @@ export function RecurringView() {
             .eq("is_deleted", false)
             .order("created_at", { ascending: true })
         ),
+        loggedSupabase(
+          "recurring linked bills",
+          supabase
+            .from("bills")
+            .select("id,recurring_id,generated_occurrence_date,due_date,status")
+            .eq("user_id", user.id)
+            .eq("is_deleted", false)
+            .eq("is_recurring", true)
+            .not("recurring_id", "is", null)
+        ),
       ]);
 
       if (!isCurrent()) return;
 
-      const errors = [recurringSettled, categoriesSettled, walletSettled].map(settledError).filter(Boolean);
+      const errors = [recurringSettled, categoriesSettled, walletSettled, billsSettled].map(settledError).filter(Boolean);
       if (errors.length > 0) setLoadError(errors.join(" | "));
 
       const recurringResult   = recurringSettled.status   === "fulfilled" ? recurringSettled.value   : { data: [] };
       const categoriesResult  = categoriesSettled.status  === "fulfilled" ? categoriesSettled.value  : [];
       const walletResult      = walletSettled.status      === "fulfilled" ? walletSettled.value      : { data: [] };
+      const billsResult       = billsSettled.status       === "fulfilled" ? billsSettled.value       : { data: [] };
       setRecurring(((recurringResult.data ?? []) as SupabaseRecurringRow[]).map(mapRecurring));
+      setLinkedBills(((billsResult.data ?? []) as SupabaseGeneratedBillRow[])
+        .filter((bill) => bill.recurring_id)
+        .map((bill) => ({
+          id: bill.id,
+          recurringId: bill.recurring_id as string,
+          occurrenceDate: bill.generated_occurrence_date ?? bill.due_date,
+          dueDate: bill.due_date,
+          status: bill.status,
+        })));
       setCategories(categoriesResult);
       setWallets((walletResult.data ?? []) as SupabaseWallet[]);
     } catch (err) {
       if (!isCurrent()) return;
       setLoadError(err instanceof Error ? err.message : "Failed to load recurring transactions.");
       setRecurring([]);
+      setLinkedBills([]);
       setCategories([]);
       setWallets([]);
     } finally {
@@ -1319,13 +1440,21 @@ export function RecurringView() {
 
   const catMap = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories]);
   const walMap = useMemo(() => new Map(wallets.map((w) => [w.id, w])), [wallets]);
+  const linkedBillMap = useMemo(
+    () => new Map(linkedBills.map((bill) => [`${bill.recurringId}:${bill.occurrenceDate}`, bill])),
+    [linkedBills]
+  );
 
   const upcomingWithOverdue = useMemo(() => {
     const inWeek = new Date();
     inWeek.setDate(inWeek.getDate() + 7);
     const inWeekStr = toIsoDate(inWeek);
-    return recurring.filter((r) => r.status === "active" && r.nextRunDate <= inWeekStr);
-  }, [recurring]);
+    return recurring.filter((r) => {
+      if (r.status !== "active") return false;
+      const payment = getPaymentInfo(r, getLinkedGeneratedBill(r, linkedBillMap));
+      return !payment.isPaidCurrentPeriod && payment.date <= inWeekStr;
+    });
+  }, [linkedBillMap, recurring]);
 
   const filtered = useMemo(() => {
     let result = recurring;
@@ -1489,7 +1618,7 @@ export function RecurringView() {
 
             {/* upcoming */}
             {upcomingWithOverdue.length > 0 && (
-              <UpcomingCard items={upcomingWithOverdue} catMap={catMap} />
+              <UpcomingCard items={upcomingWithOverdue} catMap={catMap} billMap={linkedBillMap} />
             )}
 
             {/* mobile search and filters */}
@@ -1613,6 +1742,7 @@ export function RecurringView() {
                   <RecurringCard
                     key={item.id}
                     item={item}
+                    linkedBill={getLinkedGeneratedBill(item, linkedBillMap)}
                     catMap={catMap}
                     walMap={walMap}
                     onEdit={() => setModal({ mode: "edit", item })}

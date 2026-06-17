@@ -27,6 +27,16 @@ export type WalletDisplay = {
   limit?: number;
   icon?: string | null;
   logo_url?: string | null;
+  logo_path?: string | null;
+  account_name?: string | null;
+  account_number?: string | null;
+  bank_name?: string | null;
+  mobile_number?: string | null;
+  qr_code_url?: string | null;
+  qr_code_path?: string | null;
+  qr_code_file_name?: string | null;
+  qr_code_mime_type?: string | null;
+  qr_code_size?: number | null;
 };
 
 type WalletType = "Bank Account" | "Cash" | "E-Wallet" | "Credit Card" | "BNPL";
@@ -133,6 +143,7 @@ type WalletCardProps = {
   onEdit?: () => void;
   onDelete?: () => void;
   onTransfer?: () => void;
+  onOpen?: () => void;
 };
 
 export function WalletCard({
@@ -143,6 +154,7 @@ export function WalletCard({
   onEdit,
   onDelete,
   onTransfer,
+  onOpen,
 }: WalletCardProps) {
   const { currency, formatCurrency } = useCurrency();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -180,7 +192,16 @@ export function WalletCard({
   }, [menuOpen]);
 
   return (
-    <Card className="relative flex min-h-[148px] flex-col py-0 sm:min-h-[220px]" style={walletGradientStyle(colors.hex)}>
+    <Card
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") onOpen?.();
+      }}
+      className="relative flex min-h-[148px] flex-col py-0 transition-shadow hover:ring-1 hover:ring-primary/30 sm:min-h-[220px]"
+      style={walletGradientStyle(colors.hex)}
+    >
       <CardContent className="flex flex-1 flex-col gap-2.5 p-3 sm:gap-4 sm:p-5">
         {/* icon + badge + menu */}
         <div className="flex items-start justify-between">
@@ -205,7 +226,8 @@ export function WalletCard({
           <div className="relative">
             <button
               ref={triggerRef}
-              onClick={() => {
+              onClick={(event) => {
+                event.stopPropagation();
                 if (triggerRef.current) {
                   const rect = triggerRef.current.getBoundingClientRect();
                   setMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
@@ -226,8 +248,8 @@ export function WalletCard({
                 <button
                   onClick={() => {
                     setMenuOpen(false);
-                    onTransfer?.();
-                  }}
+                  onTransfer?.();
+                }}
                   className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-sky-300 hover:bg-sky-500/10"
                 >
                   <ArrowLeftRight size={12} />
@@ -236,8 +258,8 @@ export function WalletCard({
                 <button
                   onClick={() => {
                     setMenuOpen(false);
-                    onEdit?.();
-                  }}
+                  onEdit?.();
+                }}
                   className="block w-full px-3 py-2 text-left text-xs font-medium text-popover-foreground hover:bg-muted"
                 >
                   Edit Wallet
@@ -245,8 +267,8 @@ export function WalletCard({
                 <button
                   onClick={() => {
                     setMenuOpen(false);
-                    onDelete?.();
-                  }}
+                  onDelete?.();
+                }}
                   className="block w-full px-3 py-2 text-left text-xs font-medium text-rose-400 hover:bg-rose-500/10"
                 >
                   Delete Wallet

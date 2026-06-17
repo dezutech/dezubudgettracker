@@ -413,7 +413,7 @@ async function syncRecurringMonthlyBillsForDashboard(userId: string, month: stri
     "dashboard existing recurring bills",
     supabase
       .from("bills")
-      .select("recurring_id,due_date")
+      .select("recurring_id,generated_occurrence_date,due_date")
       .eq("user_id", userId)
       .eq("is_deleted", false)
       .not("recurring_id", "is", null)
@@ -422,8 +422,8 @@ async function syncRecurringMonthlyBillsForDashboard(userId: string, month: stri
   if (existingError) return existingError.message;
 
   const existing = new Set(
-    ((existingRows ?? []) as Array<{ recurring_id: string | null; due_date: string }>)
-      .map((bill) => `${bill.recurring_id}:${bill.due_date}`)
+    ((existingRows ?? []) as Array<{ recurring_id: string | null; generated_occurrence_date?: string | null; due_date: string }>)
+      .map((bill) => `${bill.recurring_id}:${bill.generated_occurrence_date ?? bill.due_date}`)
   );
   const queued = new Set<string>();
   const generated = recurring.flatMap((item) => {
@@ -438,6 +438,7 @@ async function syncRecurringMonthlyBillsForDashboard(userId: string, month: stri
       notes: string;
       is_recurring: boolean;
       recurring_id: string;
+      generated_occurrence_date: string;
     }> = [];
 
     const walletId = item.wallet_id && validWalletIds.has(item.wallet_id) ? item.wallet_id : null;
@@ -460,6 +461,7 @@ async function syncRecurringMonthlyBillsForDashboard(userId: string, month: stri
           notes: "Generated from recurring transaction",
           is_recurring: true,
           recurring_id: item.id,
+          generated_occurrence_date: dueDate,
         });
       }
       dueDate = nextMonthDate(dueDate);

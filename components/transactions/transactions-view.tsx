@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { CurrencyInputPrefix } from "@/components/ui/currency-input-prefix";
+import { ReceiptAttachment } from "@/components/ui/receipt-attachment";
 import { createClient } from "@/lib/supabase/client";
 import { ensureSupabaseDefaultCategories } from "@/lib/supabase/categories";
 import { loggedSupabase, settledError } from "@/lib/supabase/query";
@@ -31,6 +32,12 @@ import {
   type DbWallet,
 } from "@/lib/db";
 import { OFFLINE_USER_ID } from "@/lib/offline/constants";
+import {
+  EMPTY_RECEIPT,
+  getReceiptMetadata,
+  resolveReceiptMetadata,
+  type ReceiptDraft,
+} from "@/lib/receipts";
 
 // ─── icon map ─────────────────────────────────────────────────────────────────
 
@@ -108,6 +115,11 @@ type SupabaseTransaction = {
   transaction_date: string;
   created_at?: string;
   updated_at?: string;
+  receipt_url: string | null;
+  receipt_path: string | null;
+  receipt_file_name: string | null;
+  receipt_mime_type: string | null;
+  receipt_size: number | null;
 };
 
 function localWalletToSupabase(wallet: DbWallet): SupabaseWallet {
@@ -140,6 +152,11 @@ function localTransactionToSupabase(tx: DbTransaction): SupabaseTransaction {
     transaction_date: tx.date,
     created_at: tx.createdAt,
     updated_at: tx.updatedAt,
+    receipt_url: tx.receipt_url ?? null,
+    receipt_path: tx.receipt_path ?? null,
+    receipt_file_name: tx.receipt_file_name ?? null,
+    receipt_mime_type: tx.receipt_mime_type ?? null,
+    receipt_size: tx.receipt_size ?? null,
   };
 }
 
@@ -436,6 +453,7 @@ export function AddTransactionModal({
   const [walletId,  setWalletId]  = useState("");
   const [date,      setDate]      = useState(() => new Date().toISOString().split("T")[0]);
   const [notes,     setNotes]     = useState("");
+  const [receiptDraft, setReceiptDraft] = useState<ReceiptDraft>({ file: null, remove: false });
   const [saving,    setSaving]    = useState(false);
   const [error,     setError]     = useState("");
 
@@ -446,7 +464,7 @@ export function AddTransactionModal({
   function reset() {
     setTxType("expense"); setAmount(""); setName(""); setCatId("");
     setWalletId(""); setDate(new Date().toISOString().split("T")[0]);
-    setNotes(""); setError("");
+    setNotes(""); setReceiptDraft({ file: null, remove: false }); setError("");
   }
 
   function handleClose() { reset(); onClose(); }
@@ -461,6 +479,18 @@ export function AddTransactionModal({
 
     setSaving(true);
     try {
+      if (!isOffline && !userId) {
+        setError("Please sign in to add a transaction.");
+        return;
+      }
+      const receipt = await resolveReceiptMetadata({
+        current: EMPTY_RECEIPT,
+        draft: receiptDraft,
+        isOffline,
+        userId: isOffline ? OFFLINE_USER_ID : userId ?? "",
+        scope: "transactions",
+      });
+
       if (isOffline) {
         await createTransaction({
           userId: OFFLINE_USER_ID,
@@ -471,15 +501,11 @@ export function AddTransactionModal({
           date,
           name: name.trim(),
           notes: notes.trim() || undefined,
+          ...receipt,
         });
         reset();
         onCreated();
         onClose();
-        return;
-      }
-
-      if (!userId) {
-        setError("Please sign in to add a transaction.");
         return;
       }
 
@@ -499,6 +525,7 @@ export function AddTransactionModal({
         description: name.trim(),
         notes: notes.trim() || null,
         transaction_date: date,
+        ...receipt,
       });
 
       if (insertError) {
@@ -647,6 +674,12 @@ export function AddTransactionModal({
             </div>
           </div>
 
+          <ReceiptAttachment
+            value={null}
+            draft={receiptDraft}
+            onDraftChange={setReceiptDraft}
+          />
+
           {error && (
             <p className="text-xs text-rose-400 bg-rose-500/10 rounded-lg px-3 py-2">{error}</p>
           )}
@@ -700,6 +733,7 @@ function EditTransactionModal({
   const [walletId, setWalletId] = useState("");
   const [date, setDate] = useState("");
   const [notes, setNotes] = useState("");
+  const [receiptDraft, setReceiptDraft] = useState<ReceiptDraft>({ file: null, remove: false });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -712,6 +746,7 @@ function EditTransactionModal({
     setWalletId(tx.wallet_id);
     setDate(tx.transaction_date);
     setNotes(tx.notes ?? "");
+    setReceiptDraft({ file: null, remove: false });
     setError("");
   }, [tx]);
 
@@ -754,6 +789,15 @@ function EditTransactionModal({
 
     setSaving(true);
     try {
+      if (!isOffline && !userId) { setError("Please sign in to edit a transaction."); return; }
+      const receipt = await resolveReceiptMetadata({
+        current: getReceiptMetadata(tx),
+        draft: receiptDraft,
+        isOffline,
+        userId: isOffline ? OFFLINE_USER_ID : userId ?? "",
+        scope: "transactions",
+      });
+
       if (isOffline) {
         await updateTransaction(Number(tx.id), {
           walletId: Number(walletId),
@@ -763,13 +807,13 @@ function EditTransactionModal({
           date,
           name: name.trim(),
           notes: notes.trim() || undefined,
+          ...receipt,
         });
         onSaved();
         onClose();
         return;
       }
 
-      if (!userId) { setError("Please sign in to edit a transaction."); return; }
       const supabase = createClient();
       const oldEffect = walletEffect(tx.transaction_type, Number(tx.amount));
       const newEffect = walletEffect(txType, parsed);
@@ -781,6 +825,7 @@ function EditTransactionModal({
         description: name.trim(),
         notes: notes.trim() || null,
         transaction_date: date,
+        ...receipt,
       };
 
       const { data: updatedRows, error: updateError } = await loggedSupabase(
@@ -790,7 +835,7 @@ function EditTransactionModal({
           .update(payload)
           .eq("id", tx.id)
           .eq("user_id", userId)
-          .select("id,user_id,wallet_id,destination_wallet_id,debt_id,debt_type,person_name,category_id,amount,transaction_type,description,notes,transaction_date,created_at,updated_at,is_deleted")
+          .select("id,user_id,wallet_id,destination_wallet_id,debt_id,debt_type,person_name,category_id,amount,transaction_type,description,notes,transaction_date,created_at,updated_at,is_deleted,receipt_url,receipt_path,receipt_file_name,receipt_mime_type,receipt_size")
       );
 
       if (updateError) { setError(updateError.message); return; }
@@ -876,6 +921,12 @@ function EditTransactionModal({
               <SelectField value={walletId} onChange={setWalletId} placeholder="Select" options={wallets.map((w) => ({ value: w.id, label: w.name }))} />
             </div>
           </div>
+
+          <ReceiptAttachment
+            value={tx}
+            draft={receiptDraft}
+            onDraftChange={setReceiptDraft}
+          />
 
           {error && <p className="text-xs text-rose-400 bg-rose-500/10 rounded-lg px-3 py-2">{error}</p>}
         </div>
@@ -1005,6 +1056,10 @@ function TransactionDetailsModal({
             <p className={cn("mt-1 whitespace-pre-wrap break-words text-sm", notes ? "text-zinc-100" : "text-zinc-500")}>
               {notes || "No notes added"}
             </p>
+          </div>
+
+          <div className="mt-2">
+            <ReceiptAttachment value={raw} draft={{ file: null, remove: false }} onDraftChange={() => {}} readOnly />
           </div>
         </div>
 
@@ -1198,7 +1253,7 @@ export function TransactionsView() {
           "transactions",
           supabase
             .from("transactions")
-            .select("id,wallet_id,destination_wallet_id,debt_id,debt_type,person_name,category_id,amount,transaction_type,description,notes,transaction_date,created_at,updated_at")
+            .select("id,wallet_id,destination_wallet_id,debt_id,debt_type,person_name,category_id,amount,transaction_type,description,notes,transaction_date,created_at,updated_at,receipt_url,receipt_path,receipt_file_name,receipt_mime_type,receipt_size")
             .eq("user_id", user.id)
             .eq("is_deleted", false)
             .order("created_at", { ascending: false })

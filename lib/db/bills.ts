@@ -106,7 +106,7 @@ export async function syncRecurringMonthlyBills(userId = OFFLINE_USER_ID): Promi
         .first();
 
       if (!exists) {
-        await createBill({
+        const billId = await createBill({
           userId,
           title: item.title,
           amount: item.amount,
@@ -117,8 +117,10 @@ export async function syncRecurringMonthlyBills(userId = OFFLINE_USER_ID): Promi
           notes: "Generated from recurring transaction",
           isRecurring: true,
           recurringId: item.id,
+          generatedOccurrenceDate: dueDate,
           isDeleted: false,
         });
+        await db.bills.update(billId, { billId, updatedAt: now() });
       }
 
       dueDate = nextOccurrence(dueDate, "monthly");

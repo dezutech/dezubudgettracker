@@ -20,6 +20,16 @@ export type DbWallet = {
   limit?: number | null; // credit cards only
   icon?: string;
   logoUrl?: string;
+  logoPath?: string | null;
+  accountName?: string | null;
+  accountNumber?: string | null;
+  bankName?: string | null;
+  mobileNumber?: string | null;
+  qrCodeUrl?: string | null;
+  qrCodePath?: string | null;
+  qrCodeFileName?: string | null;
+  qrCodeMimeType?: string | null;
+  qrCodeSize?: number | null;
   isArchived: boolean;
   createdAt: string;  // ISO timestamp
   updatedAt: string;
@@ -44,6 +54,11 @@ export type DbTransaction = {
   date: string;         // ISO date "2025-05-28"
   name: string;         // description / payee
   notes?: string;
+  receipt_url?: string | null;
+  receipt_path?: string | null;
+  receipt_file_name?: string | null;
+  receipt_mime_type?: string | null;
+  receipt_size?: number | null;
   syncId: string;       // UUID — for future Supabase sync
   createdAt: string;
   updatedAt: string;
@@ -139,6 +154,13 @@ export type DbBill = {
   notes?: string;
   isRecurring: boolean;
   recurringId?: number | null;
+  generatedOccurrenceDate?: string | null;
+  billId?: number | null;
+  receipt_url?: string | null;
+  receipt_path?: string | null;
+  receipt_file_name?: string | null;
+  receipt_mime_type?: string | null;
+  receipt_size?: number | null;
   isDeleted: boolean;
   createdAt: string;
   updatedAt: string;

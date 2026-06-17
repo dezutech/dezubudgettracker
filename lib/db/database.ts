@@ -96,6 +96,29 @@ class DesuBudgetDB extends Dexie {
     this.version(9).stores({
       recurringTransactions: "++id, userId, nextRunDate, isActive, status, walletId, categoryId, [userId+nextRunDate], [userId+status]",
     });
+
+    this.version(10).stores({
+      bills: "++id, userId, dueDate, status, recurringId, generatedOccurrenceDate, billId, isDeleted, [userId+dueDate], [userId+status], [userId+recurringId+dueDate], [userId+recurringId+generatedOccurrenceDate]",
+    }).upgrade(async (tx) => {
+      const bills = tx.table("bills");
+      await bills.toCollection().modify((bill) => {
+        if (bill.isRecurring && bill.recurringId != null && !bill.generatedOccurrenceDate) {
+          bill.generatedOccurrenceDate = bill.dueDate;
+        }
+        if (bill.isRecurring && bill.billId == null && bill.id != null) {
+          bill.billId = bill.id;
+        }
+      });
+    });
+
+    this.version(11).stores({
+      transactions: "++id, userId, walletId, categoryId, type, date, syncId, debtId, receipt_path, [userId+date], [userId+type+date], [userId+debtId], [walletId+date], [type+date]",
+      bills: "++id, userId, dueDate, status, recurringId, generatedOccurrenceDate, billId, receipt_path, isDeleted, [userId+dueDate], [userId+status], [userId+recurringId+dueDate], [userId+recurringId+generatedOccurrenceDate]",
+    });
+
+    this.version(12).stores({
+      wallets: "++id, userId, name, type, isArchived, accountNumber, mobileNumber, qrCodePath, [userId+isArchived]",
+    });
   }
 }
 

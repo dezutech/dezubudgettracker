@@ -92,6 +92,16 @@ export interface Database {
           color: string | null;
           icon: string | null;
           logo_url: string | null;
+          logo_path: string | null;
+          account_name: string | null;
+          account_number: string | null;
+          bank_name: string | null;
+          mobile_number: string | null;
+          qr_code_url: string | null;
+          qr_code_path: string | null;
+          qr_code_file_name: string | null;
+          qr_code_mime_type: string | null;
+          qr_code_size: number | null;
         };
         Insert: CommonInsert & {
           name: string;
@@ -101,6 +111,16 @@ export interface Database {
           color?: string | null;
           icon?: string | null;
           logo_url?: string | null;
+          logo_path?: string | null;
+          account_name?: string | null;
+          account_number?: string | null;
+          bank_name?: string | null;
+          mobile_number?: string | null;
+          qr_code_url?: string | null;
+          qr_code_path?: string | null;
+          qr_code_file_name?: string | null;
+          qr_code_mime_type?: string | null;
+          qr_code_size?: number | null;
         };
         Update: CommonUpdate & {
           name?: string;
@@ -110,6 +130,16 @@ export interface Database {
           color?: string | null;
           icon?: string | null;
           logo_url?: string | null;
+          logo_path?: string | null;
+          account_name?: string | null;
+          account_number?: string | null;
+          bank_name?: string | null;
+          mobile_number?: string | null;
+          qr_code_url?: string | null;
+          qr_code_path?: string | null;
+          qr_code_file_name?: string | null;
+          qr_code_mime_type?: string | null;
+          qr_code_size?: number | null;
         };
       };
       categories: {
@@ -149,6 +179,11 @@ export interface Database {
           description: string | null;
           notes: string | null;
           transaction_date: string;
+          receipt_url: string | null;
+          receipt_path: string | null;
+          receipt_file_name: string | null;
+          receipt_mime_type: string | null;
+          receipt_size: number | null;
         };
         Insert: CommonInsert & {
           wallet_id: string;
@@ -163,6 +198,11 @@ export interface Database {
           description?: string | null;
           notes?: string | null;
           transaction_date: string;
+          receipt_url?: string | null;
+          receipt_path?: string | null;
+          receipt_file_name?: string | null;
+          receipt_mime_type?: string | null;
+          receipt_size?: number | null;
         };
         Update: CommonUpdate & {
           wallet_id?: string;
@@ -177,6 +217,11 @@ export interface Database {
           description?: string | null;
           notes?: string | null;
           transaction_date?: string;
+          receipt_url?: string | null;
+          receipt_path?: string | null;
+          receipt_file_name?: string | null;
+          receipt_mime_type?: string | null;
+          receipt_size?: number | null;
         };
       };
       budgets: {
@@ -294,6 +339,13 @@ export interface Database {
           notes: string | null;
           is_recurring: boolean;
           recurring_id: string | null;
+          generated_occurrence_date: string | null;
+          bill_id: string | null;
+          receipt_url: string | null;
+          receipt_path: string | null;
+          receipt_file_name: string | null;
+          receipt_mime_type: string | null;
+          receipt_size: number | null;
         };
         Insert: CommonInsert & {
           title: string;
@@ -305,6 +357,12 @@ export interface Database {
           notes?: string | null;
           is_recurring?: boolean;
           recurring_id?: string | null;
+          generated_occurrence_date?: string | null;
+          receipt_url?: string | null;
+          receipt_path?: string | null;
+          receipt_file_name?: string | null;
+          receipt_mime_type?: string | null;
+          receipt_size?: number | null;
         };
         Update: CommonUpdate & {
           title?: string;
@@ -316,6 +374,12 @@ export interface Database {
           notes?: string | null;
           is_recurring?: boolean;
           recurring_id?: string | null;
+          generated_occurrence_date?: string | null;
+          receipt_url?: string | null;
+          receipt_path?: string | null;
+          receipt_file_name?: string | null;
+          receipt_mime_type?: string | null;
+          receipt_size?: number | null;
         };
       };
       debts: {

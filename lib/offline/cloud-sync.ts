@@ -231,6 +231,16 @@ function walletPayload(userId: string, wallet: DbWallet) {
     color: wallet.color ?? null,
     icon: wallet.icon ?? null,
     logo_url: wallet.logoUrl ?? null,
+    logo_path: wallet.logoPath ?? null,
+    account_name: wallet.accountName ?? null,
+    account_number: wallet.accountNumber ?? null,
+    bank_name: wallet.bankName ?? null,
+    mobile_number: wallet.mobileNumber ?? null,
+    qr_code_url: wallet.qrCodeUrl ?? null,
+    qr_code_path: wallet.qrCodePath ?? null,
+    qr_code_file_name: wallet.qrCodeFileName ?? null,
+    qr_code_mime_type: wallet.qrCodeMimeType ?? null,
+    qr_code_size: wallet.qrCodeSize ?? null,
     created_at: wallet.createdAt,
     updated_at: wallet.updatedAt,
     synced_at: new Date().toISOString(),
@@ -274,6 +284,11 @@ function transactionPayload(ctx: SyncContext, tx: DbTransaction) {
     description: tx.name,
     notes: tx.notes ?? null,
     transaction_date: tx.date,
+    receipt_url: tx.receipt_url ?? null,
+    receipt_path: tx.receipt_path ?? null,
+    receipt_file_name: tx.receipt_file_name ?? null,
+    receipt_mime_type: tx.receipt_mime_type ?? null,
+    receipt_size: tx.receipt_size ?? null,
     created_at: tx.createdAt,
     updated_at: tx.updatedAt,
     synced_at: new Date().toISOString(),
@@ -350,6 +365,12 @@ function billPayload(ctx: SyncContext, bill: DbBill) {
     notes: bill.notes ?? null,
     is_recurring: Boolean(bill.isRecurring && recurringId),
     recurring_id: recurringId,
+    generated_occurrence_date: bill.generatedOccurrenceDate ?? (bill.isRecurring ? bill.dueDate : null),
+    receipt_url: bill.receipt_url ?? null,
+    receipt_path: bill.receipt_path ?? null,
+    receipt_file_name: bill.receipt_file_name ?? null,
+    receipt_mime_type: bill.receipt_mime_type ?? null,
+    receipt_size: bill.receipt_size ?? null,
     created_at: bill.createdAt,
     updated_at: bill.updatedAt,
     synced_at: new Date().toISOString(),
@@ -410,7 +431,15 @@ function findRecurring(ctx: SyncContext, recurring: DbRecurringTransaction) {
 }
 
 function findBill(ctx: SyncContext, bill: DbBill) {
+  const recurringId = bill.recurringId != null ? ctx.recurringMap.get(bill.recurringId) ?? null : null;
+  const occurrenceDate = bill.generatedOccurrenceDate ?? bill.dueDate;
   return byLocalId(ctx.cloud.bills, bill.id)
+    ?? (recurringId
+      ? ctx.cloud.bills.find((row) =>
+        String(row.recurring_id) === recurringId &&
+        ((row.generated_occurrence_date as string | null | undefined) ?? row.due_date) === occurrenceDate
+      )
+      : undefined)
     ?? ctx.cloud.bills.find((row) =>
       normalized(row.title) === normalized(bill.title) &&
       Number(row.amount) === bill.amount &&

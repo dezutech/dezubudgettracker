@@ -58,6 +58,16 @@ create table if not exists public.wallets (
   color text,
   icon text,
   logo_url text,
+  logo_path text,
+  account_name text,
+  account_number text,
+  bank_name text,
+  mobile_number text,
+  qr_code_url text,
+  qr_code_path text,
+  qr_code_file_name text,
+  qr_code_mime_type text,
+  qr_code_size integer,
   local_id text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -96,6 +106,11 @@ create table if not exists public.transactions (
   description text,
   notes text,
   transaction_date date not null,
+  receipt_url text,
+  receipt_path text,
+  receipt_file_name text,
+  receipt_mime_type text,
+  receipt_size integer,
   local_id text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -217,6 +232,13 @@ create table if not exists public.bills (
   notes text,
   is_recurring boolean not null default false,
   recurring_id uuid references public.recurring_transactions(id) on delete set null,
+  generated_occurrence_date date,
+  bill_id uuid generated always as (id) stored,
+  receipt_url text,
+  receipt_path text,
+  receipt_file_name text,
+  receipt_mime_type text,
+  receipt_size integer,
   local_id text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -567,6 +589,9 @@ create index if not exists bills_user_status_idx
 create index if not exists bills_recurring_due_idx
   on public.bills (recurring_id, due_date)
   where recurring_id is not null and is_deleted = false;
+create index if not exists bills_recurring_occurrence_idx
+  on public.bills (recurring_id, generated_occurrence_date)
+  where recurring_id is not null and generated_occurrence_date is not null and is_deleted = false;
 create unique index if not exists bills_user_recurring_due_active_uidx
   on public.bills (user_id, recurring_id, due_date)
   where recurring_id is not null and is_deleted = false;
@@ -675,6 +700,112 @@ create policy "wallet_logos_delete_own_folder"
   on storage.objects for delete
   using (
     bucket_id = 'wallet-logos'
+    and auth.role() = 'authenticated'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'wallet-assets',
+  'wallet-assets',
+  false,
+  5242880,
+  array['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml']
+)
+on conflict (id) do update
+set
+  public = excluded.public,
+  file_size_limit = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists "wallet_assets_select_own_folder" on storage.objects;
+create policy "wallet_assets_select_own_folder"
+  on storage.objects for select
+  using (
+    bucket_id = 'wallet-assets'
+    and auth.role() = 'authenticated'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+drop policy if exists "wallet_assets_insert_own_folder" on storage.objects;
+create policy "wallet_assets_insert_own_folder"
+  on storage.objects for insert
+  with check (
+    bucket_id = 'wallet-assets'
+    and auth.role() = 'authenticated'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+drop policy if exists "wallet_assets_update_own_folder" on storage.objects;
+create policy "wallet_assets_update_own_folder"
+  on storage.objects for update
+  using (
+    bucket_id = 'wallet-assets'
+    and auth.role() = 'authenticated'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  )
+  with check (
+    bucket_id = 'wallet-assets'
+    and auth.role() = 'authenticated'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+drop policy if exists "wallet_assets_delete_own_folder" on storage.objects;
+create policy "wallet_assets_delete_own_folder"
+  on storage.objects for delete
+  using (
+    bucket_id = 'wallet-assets'
+    and auth.role() = 'authenticated'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'receipts',
+  'receipts',
+  true,
+  5242880,
+  array['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
+)
+on conflict (id) do update
+set
+  public = excluded.public,
+  file_size_limit = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists "receipts_select_public" on storage.objects;
+create policy "receipts_select_public"
+  on storage.objects for select
+  using (bucket_id = 'receipts');
+
+drop policy if exists "receipts_insert_own_folder" on storage.objects;
+create policy "receipts_insert_own_folder"
+  on storage.objects for insert
+  with check (
+    bucket_id = 'receipts'
+    and auth.role() = 'authenticated'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+drop policy if exists "receipts_update_own_folder" on storage.objects;
+create policy "receipts_update_own_folder"
+  on storage.objects for update
+  using (
+    bucket_id = 'receipts'
+    and auth.role() = 'authenticated'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  )
+  with check (
+    bucket_id = 'receipts'
+    and auth.role() = 'authenticated'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+drop policy if exists "receipts_delete_own_folder" on storage.objects;
+create policy "receipts_delete_own_folder"
+  on storage.objects for delete
+  using (
+    bucket_id = 'receipts'
     and auth.role() = 'authenticated'
     and (storage.foldername(name))[1] = auth.uid()::text
   );
