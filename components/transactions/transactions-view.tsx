@@ -1090,9 +1090,9 @@ function TransactionRow({
           onOpen();
         }
       }}
-      className="dezu-card group flex cursor-pointer items-center gap-3 rounded-[1.15rem] bg-card/90 px-3 py-3 transition-colors hover:bg-card"
+      className="dezu-card group flex cursor-pointer items-center gap-2.5 rounded-xl bg-card/90 px-2.5 py-2.5 transition-colors hover:bg-card sm:gap-3 sm:rounded-[1.15rem] sm:px-3 sm:py-3"
     >
-      <div className={`w-9 h-9 rounded-xl ${colors.bg} flex items-center justify-center shrink-0`}>
+      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${colors.bg}`}>
         <Icon size={15} className={colors.text} strokeWidth={1.75} />
       </div>
       <div className="flex-1 min-w-0">
@@ -1110,7 +1110,6 @@ function TransactionRow({
               {createdTime}
             </>
           )}
-          {tx.notes && <span className="ml-1 text-zinc-600 italic">"{tx.notes}"</span>}
         </p>
       </div>
       <p className={`text-sm font-semibold tabular-nums shrink-0 ${isIncome ? "text-emerald-400" : isTransfer ? "text-sky-400" : "text-zinc-100"}`}>
@@ -1438,7 +1437,7 @@ export function TransactionsView() {
 
   return (
     <>
-      <div className="px-5 pb-32 pt-7 max-w-6xl mx-auto space-y-6 md:pb-7">
+      <div className="mx-auto max-w-6xl space-y-4 px-4 pb-32 pt-5 sm:space-y-6 sm:px-5 sm:pt-7 md:pb-7">
         {/* header */}
         <div className="flex items-center justify-between gap-4">
           <div>

@@ -243,7 +243,7 @@ function GoalCard({
 
   return (
     <div role="button" tabIndex={0} onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onOpen(); }} className={cn(
-      "dezu-card group flex flex-col gap-2 rounded-xl bg-card/90 p-3 transition-all hover:ring-1 hover:ring-[var(--theme-primary)]/30 sm:gap-3 sm:rounded-[1.15rem] sm:p-4",
+      "dezu-card group flex flex-col gap-2 rounded-xl bg-card/90 p-2.5 transition-all hover:ring-1 hover:ring-[var(--theme-primary)]/30 sm:gap-3 sm:rounded-[1.15rem] sm:p-4",
       isDone   ? "ring-emerald-500/30" :
       isPaused ? "ring-zinc-800/50 opacity-70" :
                  "ring-zinc-800 hover:ring-zinc-700"
@@ -251,12 +251,12 @@ function GoalCard({
       {/* top row */}
       <div className="flex items-start gap-3">
         <div className={cn(
-          "relative hidden h-11 w-11 shrink-0 items-center justify-center rounded-xl sm:flex",
+          "relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl sm:h-11 sm:w-11",
           colorEntry.bg
         )}>
-          <Icon size={20} className={colorEntry.text} strokeWidth={1.75} />
+          <Icon size={18} className={colorEntry.text} strokeWidth={1.75} />
           {isDone && (
-            <div className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-zinc-900 flex items-center justify-center">
+            <div className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-zinc-900">
               <CheckCircle2 size={14} className="text-emerald-400" strokeWidth={2} />
             </div>
           )}
@@ -1465,7 +1465,7 @@ export function GoalsView() {
 
   return (
     <>
-      <div className="px-5 py-7 max-w-4xl mx-auto space-y-6">
+      <div className="mx-auto max-w-4xl space-y-4 px-4 py-5 sm:space-y-6 sm:px-5 sm:py-7">
         {/* header */}
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0 flex-1">
@@ -1569,7 +1569,7 @@ export function GoalsView() {
                 )}
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2 md:gap-4">
                 {filtered.map((goal) => (
                   <GoalCard
                     key={goal.id}

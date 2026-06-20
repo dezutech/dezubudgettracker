@@ -7,9 +7,9 @@ export default function SettingsPage() {
   return (
     <>
       <OfflineModeCard />
+      <CategoriesView />
       <CurrencySelector />
       <ThemeSelector />
-      <CategoriesView />
     </>
   );
 }

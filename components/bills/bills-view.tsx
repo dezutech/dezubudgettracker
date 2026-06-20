@@ -623,10 +623,10 @@ function BillRow({
   const statusLabel = STATUS_CONFIG[status].label;
 
   return (
-    <div role="button" tabIndex={0} onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onOpen(); }} className="dezu-card rounded-xl bg-card/90 p-3 transition-colors hover:ring-1 hover:ring-[var(--theme-primary)]/30 sm:rounded-[1.15rem] sm:p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
-        <div className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-400 sm:flex">
-          <ReceiptText size={18} strokeWidth={1.8} />
+    <div role="button" tabIndex={0} onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onOpen(); }} className="dezu-card rounded-xl bg-card/90 p-2.5 transition-colors hover:ring-1 hover:ring-[var(--theme-primary)]/30 sm:rounded-[1.15rem] sm:p-4">
+      <div className="flex gap-2.5 sm:gap-3 sm:flex-row sm:items-start">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-400 sm:h-10 sm:w-10">
+          <ReceiptText size={17} strokeWidth={1.8} />
         </div>
 
         <div className="min-w-0 flex-1">
@@ -1170,7 +1170,7 @@ export function BillsView() {
 
   return (
     <>
-      <div className="mx-auto max-w-6xl space-y-6 px-5 py-7">
+      <div className="mx-auto max-w-6xl space-y-4 px-4 py-5 sm:space-y-6 sm:px-5 sm:py-7">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-xl font-bold tracking-tight text-zinc-50">Bills</h1>
@@ -1247,7 +1247,7 @@ export function BillsView() {
                 </button>
               </div>
             ) : (
-              <div className="grid grid-cols-1 gap-3">
+              <div className="grid grid-cols-1 gap-2.5 sm:gap-3">
                 {filteredBills.map((bill) => (
                   <BillRow
                     key={bill.id}

@@ -849,10 +849,10 @@ function DebtRow({
     : 0;
 
   return (
-    <div role="button" tabIndex={0} onClick={onViewDetails} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onViewDetails(); }} className="dezu-card rounded-xl bg-card/90 p-3 transition-colors hover:ring-1 hover:ring-[var(--theme-primary)]/30 md:rounded-[1.15rem] md:p-4">
+    <div role="button" tabIndex={0} onClick={onViewDetails} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onViewDetails(); }} className="dezu-card rounded-xl bg-card/90 p-2.5 transition-colors hover:ring-1 hover:ring-[var(--theme-primary)]/30 md:rounded-[1.15rem] md:p-4">
       <div className="flex gap-2.5 md:gap-3">
-        <div className={cn("hidden h-9 w-9 shrink-0 items-center justify-center rounded-xl md:flex md:h-10 md:w-10", isOwe ? "bg-rose-500/10 text-rose-400" : "bg-emerald-500/10 text-emerald-400")}>
-          <Icon size={17} strokeWidth={1.8} />
+        <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-xl md:h-10 md:w-10", isOwe ? "bg-rose-500/10 text-rose-400" : "bg-emerald-500/10 text-emerald-400")}>
+          <Icon size={16} strokeWidth={1.8} />
         </div>
 
         <div className="min-w-0 flex-1">
@@ -1164,7 +1164,7 @@ export function DebtsView() {
 
   return (
     <>
-      <div className="mx-auto max-w-6xl space-y-4 px-5 py-5 sm:space-y-6 sm:py-7">
+      <div className="mx-auto max-w-6xl space-y-4 px-4 py-5 sm:space-y-6 sm:px-5 sm:py-7">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-xl font-bold tracking-tight text-foreground">Debt Tracker</h1>
@@ -1232,7 +1232,7 @@ export function DebtsView() {
                 </button>
               </div>
             ) : (
-              <div className="grid grid-cols-1 gap-3">
+              <div className="grid grid-cols-1 gap-2.5 sm:gap-3">
                 {filteredDebts.map((debt) => (
                   <DebtRow
                     key={debt.id}

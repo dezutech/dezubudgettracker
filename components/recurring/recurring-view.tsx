@@ -554,15 +554,15 @@ function RecurringCard({
 
   return (
     <div role="button" tabIndex={0} onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onOpen(); }} className={cn(
-      "dezu-card group flex flex-col gap-2 rounded-xl bg-card/90 p-3 transition-all hover:ring-1 hover:ring-[var(--theme-primary)]/30 sm:gap-3 sm:rounded-[1.15rem] sm:p-4",
+      "dezu-card group flex flex-col gap-2 rounded-xl bg-card/90 p-2.5 transition-all hover:ring-1 hover:ring-[var(--theme-primary)]/30 sm:gap-3 sm:rounded-[1.15rem] sm:p-4",
       isCompleted ? "ring-zinc-800/40 opacity-50" :
       !isActive   ? "ring-zinc-800/50 opacity-65" :
                     "ring-zinc-800 hover:ring-zinc-700"
     )}>
       {/* top row */}
       <div className="flex items-start gap-3">
-        <div className={cn("hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl sm:flex", colorInfo.bg)}>
-          <Icon size={18} className={colorInfo.text} strokeWidth={1.75} />
+        <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-xl sm:h-10 sm:w-10", colorInfo.bg)}>
+          <Icon size={17} className={colorInfo.text} strokeWidth={1.75} />
         </div>
 
         <div className="flex-1 min-w-0">
@@ -1680,7 +1680,7 @@ export function RecurringView() {
 
   return (
     <>
-      <div className="px-5 py-7 max-w-4xl mx-auto space-y-6">
+      <div className="mx-auto max-w-4xl space-y-4 px-4 py-5 sm:space-y-6 sm:px-5 sm:py-7">
         {/* page header */}
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -1840,7 +1840,7 @@ export function RecurringView() {
                 )}
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2 md:gap-3">
                 {filtered.map((item) => (
                   <RecurringCard
                     key={item.id}

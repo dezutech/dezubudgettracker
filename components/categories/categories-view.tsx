@@ -3,6 +3,7 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import {
   Plus, Pencil, Trash2, X, Loader2, Tag,
+  Search, SlidersHorizontal,
   Utensils, ShoppingCart, Car, Zap, Tv, ShoppingBag,
   Heart, BookOpen, Home, Repeat, Briefcase, Laptop,
   TrendingUp, Gift, CirclePlus, Music, Film, Coffee,
@@ -18,6 +19,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { loggedSupabase } from "@/lib/supabase/query";
 import { useAuth } from "@/context/auth-context";
+import { DetailRow, DetailRows, DetailsModalShell } from "@/components/ui/details-modal";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -540,55 +542,39 @@ function DeleteConfirmModal({
 
 function CategoryRow({
   category,
-  onEdit,
-  onDelete,
+  onOpen,
 }: {
   category: SupabaseCategory;
-  onEdit: () => void;
-  onDelete: () => void;
+  onOpen: () => void;
 }) {
   const Icon      = getIcon(category.icon ?? "Tag");
   const colorInfo = getColor(category.color ?? "zinc");
+  const typeLabel = category.type === "income" ? "Income" : "Expense";
 
   return (
-    <div className="theme-hover flex items-center gap-3 px-4 py-3 rounded-xl bg-card ring-1 ring-border transition-colors group">
+    <button
+      type="button"
+      onClick={onOpen}
+      className="theme-hover flex w-full items-center gap-3 rounded-xl bg-card/90 px-3 py-2.5 text-left ring-1 ring-border transition-colors"
+    >
       {/* icon */}
-      <div className={`w-9 h-9 rounded-xl ${colorInfo.bg} flex items-center justify-center shrink-0`}>
+      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${colorInfo.bg}`}>
         <Icon size={16} className={colorInfo.text} strokeWidth={1.75} />
       </div>
 
       {/* name + badges */}
-      <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
-        <span className="text-sm font-medium text-zinc-100">{category.name}</span>
-        {category.is_default && (
-          <span className="text-[10px] font-semibold text-zinc-600 bg-zinc-800 border border-zinc-700 px-1.5 py-0.5 rounded leading-none">
-            Default
-          </span>
-        )}
+      <div className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium text-card-foreground">{category.name}</span>
       </div>
 
       {/* action buttons — always visible on mobile, hover on desktop */}
-      <div className="flex items-center gap-1 shrink-0 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
-        <button
-          onClick={onEdit}
-          title="Edit"
-          className="theme-icon-button w-8 h-8 rounded-lg flex items-center justify-center transition-colors"
-        >
-          <Pencil size={13} strokeWidth={2} />
-        </button>
-        {!category.is_default && (
-          <button
-            onClick={onDelete}
-            title="Delete"
-            className="w-8 h-8 rounded-lg flex items-center justify-center text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
-          >
-            <Trash2 size={13} strokeWidth={2} />
-          </button>
-        )}
-        {/* spacer to align rows that have no delete button */}
-        {category.is_default && <div className="w-8" />}
-      </div>
-    </div>
+      <span className={cn(
+        "shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold leading-none",
+        category.type === "income" ? "bg-emerald-500/10 text-emerald-300" : "bg-rose-500/10 text-rose-300"
+      )}>
+        {typeLabel}
+      </span>
+    </button>
   );
 }
 
@@ -596,10 +582,134 @@ function CategoryRow({
 
 type TypeFilter = "all" | "expense" | "income";
 
+function CategoryDetailsModal({
+  category,
+  onClose,
+  onEdit,
+  onDelete,
+}: {
+  category: SupabaseCategory | null;
+  onClose: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  if (!category) return null;
+
+  const Icon = getIcon(category.icon ?? "Tag");
+  const colorInfo = getColor(category.color ?? "zinc");
+  const typeLabel = category.type === "income" ? "Income" : "Expense";
+
+  return (
+    <DetailsModalShell
+      open={Boolean(category)}
+      eyebrow="Category Details"
+      title={category.name}
+      onClose={onClose}
+      className="max-w-md"
+      footer={
+        <>
+          <button onClick={onEdit} className="flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-[var(--theme-primary-soft)] hover:text-[var(--theme-primary)]">
+            <Pencil size={14} />
+            Edit
+          </button>
+          {!category.is_default && (
+            <button onClick={onDelete} className="flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold text-rose-400 transition-colors hover:bg-rose-500/10">
+              <Trash2 size={14} />
+              Delete
+            </button>
+          )}
+        </>
+      }
+    >
+      <div className="mb-3 flex items-center gap-3 rounded-xl border border-border bg-card/70 px-3 py-3">
+        <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${colorInfo.bg}`}>
+          <Icon size={20} className={colorInfo.text} strokeWidth={1.75} />
+        </div>
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold text-card-foreground">{category.name}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{typeLabel}</p>
+        </div>
+      </div>
+      <DetailRows>
+        <DetailRow label="Name" value={category.name} />
+        <DetailRow label="Type" value={typeLabel} />
+        <DetailRow label="Icon" value={category.icon ?? "Tag"} />
+        <DetailRow
+          label="Color"
+          value={(
+            <span className="inline-flex items-center justify-end gap-2 sm:justify-start">
+              <span className={`h-3 w-3 rounded-full ${colorInfo.dot}`} />
+              <span className="capitalize">{category.color ?? colorInfo.name}</span>
+            </span>
+          )}
+        />
+        <DetailRow label="Kind" value={category.is_default ? "Default category" : "Custom category"} />
+      </DetailRows>
+    </DetailsModalShell>
+  );
+}
+
+function CategoryFilterSheet({
+  open,
+  value,
+  counts,
+  onChange,
+  onClose,
+}: {
+  open: boolean;
+  value: TypeFilter;
+  counts: Record<TypeFilter, number>;
+  onChange: (value: TypeFilter) => void;
+  onClose: () => void;
+}) {
+  if (!open) return null;
+  const options: Array<{ key: TypeFilter; label: string }> = [
+    { key: "all", label: "All" },
+    { key: "income", label: "Income" },
+    { key: "expense", label: "Expense" },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-end justify-center p-0 sm:items-center sm:p-4">
+      <div className="absolute inset-0 theme-overlay backdrop-blur-sm" onClick={onClose} />
+      <div className="theme-surface relative w-full rounded-t-2xl shadow-2xl ring-1 ring-border sm:max-w-md sm:rounded-2xl">
+        <div className="flex items-center justify-between border-b border-border px-5 py-4">
+          <h2 className="text-base font-semibold text-card-foreground">Filter Categories</h2>
+          <button type="button" onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+            <X size={15} />
+          </button>
+        </div>
+        <div className="grid gap-2 px-5 py-5">
+          {options.map((option) => (
+            <button
+              key={option.key}
+              type="button"
+              onClick={() => {
+                onChange(option.key);
+                onClose();
+              }}
+              className={cn(
+                "flex min-h-11 items-center justify-between rounded-xl px-3 text-sm font-medium transition-colors",
+                value === option.key ? "theme-selected" : "theme-hover bg-[var(--theme-card)] text-muted-foreground ring-1 ring-border"
+              )}
+            >
+              <span>{option.label}</span>
+              <span className="rounded px-1.5 text-xs font-semibold tabular-nums opacity-75">{counts[option.key]}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function CategoriesView() {
   const { user, loading: authLoading, isLoggingOut, isGuest } = useAuth();
   const [filter,       setFilter]       = useState<TypeFilter>("all");
+  const [search,       setSearch]       = useState("");
+  const [filterOpen,   setFilterOpen]   = useState(false);
   const [modal,        setModal]        = useState<ModalState>({ mode: "closed" });
+  const [detailsTarget,setDetailsTarget]= useState<SupabaseCategory | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SupabaseCategory | null>(null);
   const [deleteTxCount,setDeleteTxCount]= useState(0);
   const [deleting,     setDeleting]     = useState(false);
@@ -688,18 +798,15 @@ export function CategoriesView() {
   }, [deleteTarget, isGuest]);
 
   const filtered = useMemo(() => {
-    if (filter === "all") return categories;
-    return categories.filter((c) => c.type === filter);
-  }, [categories, filter]);
-
-  const expenseCategories = useMemo(
-    () => filtered.filter((c) => c.type === "expense"),
-    [filtered]
-  );
-  const incomeCategories = useMemo(
-    () => filtered.filter((c) => c.type === "income"),
-    [filtered]
-  );
+    const q = search.trim().toLowerCase();
+    return categories.filter((category) => {
+      if (filter !== "all" && category.type !== filter) return false;
+      if (!q) return true;
+      return [category.name, category.type, category.icon ?? "", category.color ?? ""].some((value) =>
+        value.toLowerCase().includes(q)
+      );
+    });
+  }, [categories, filter, search]);
 
   async function handleDelete() {
     if (!deleteTarget) return;
@@ -752,14 +859,14 @@ export function CategoriesView() {
 
   return (
     <>
-      <div className="px-5 py-7 max-w-4xl mx-auto space-y-6">
+      <div className="mx-auto max-w-4xl space-y-4 px-4 py-5 sm:space-y-6 sm:px-5 sm:py-7">
         {/* page header */}
-        <div className="flex items-center justify-between gap-4">
-          <div>
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
             <h1 className="text-xl font-bold text-zinc-50 tracking-tight">
               Categories
             </h1>
-            <p className="text-sm text-zinc-500 mt-0.5">
+            <p className="mt-0.5 truncate text-sm text-zinc-500">
               {loading
                 ? "Loading…"
                 : `${categories.length} categories · Manage your income & expense types`}
@@ -774,8 +881,34 @@ export function CategoriesView() {
           </button>
         </div>
 
+        <div className="flex items-center gap-2">
+          <div className="relative min-w-0 flex-1">
+            <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search categories..."
+              className="h-9 w-full rounded-lg border border-border bg-[var(--theme-card)] pl-9 pr-8 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-[var(--theme-primary)] focus:ring-2 focus:ring-[var(--theme-primary)]/25"
+            />
+            {search && (
+              <button type="button" onClick={() => setSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300">
+                <X size={14} />
+              </button>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => setFilterOpen(true)}
+            className="theme-hover flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--theme-card)] text-muted-foreground ring-1 ring-border transition-colors"
+            aria-label="Filter categories"
+            title="Filter categories"
+          >
+            <SlidersHorizontal size={15} />
+          </button>
+        </div>
+
         {/* type filter tabs */}
-        <div className="theme-pill-list no-scrollbar flex w-full snap-x snap-mandatory scroll-px-3 flex-nowrap items-center gap-2 overflow-x-auto overscroll-x-contain rounded-lg p-1.5 [-webkit-overflow-scrolling:touch] sm:w-fit sm:gap-0.5 sm:p-1">
+        <div className="theme-pill-list no-scrollbar hidden w-full snap-x snap-mandatory scroll-px-3 flex-nowrap items-center gap-2 overflow-x-auto overscroll-x-contain rounded-lg p-1.5 [-webkit-overflow-scrolling:touch] sm:flex sm:w-fit sm:gap-0.5 sm:p-1">
           {(
             [
               { key: "all",     label: "All"     },
@@ -807,71 +940,32 @@ export function CategoriesView() {
             <Loader2 size={24} className="animate-spin text-zinc-500" />
           </div>
         ) : (
-          <div className="space-y-8">
+          <div className="space-y-3">
             {loadError && (
               <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
                 {loadError}
               </div>
             )}
 
-            {/* Expense section */}
-            {expenseCategories.length > 0 && (
-              <section className="space-y-2">
-                <div className="flex items-center gap-2 mb-3">
-                  <span className="text-xs font-semibold text-zinc-500 uppercase tracking-widest">
-                    Expense
-                  </span>
-                  <span className="text-[10px] font-semibold text-zinc-600 bg-zinc-800 px-1.5 py-0.5 rounded">
-                    {expenseCategories.length}
-                  </span>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                  {expenseCategories.map((cat) => (
-                    <CategoryRow
-                      key={cat.id}
-                      category={cat}
-                      onEdit={() => setModal({ mode: "edit", category: cat })}
-                      onDelete={() => setDeleteTarget(cat)}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* Income section */}
-            {incomeCategories.length > 0 && (
-              <section className="space-y-2">
-                <div className="flex items-center gap-2 mb-3">
-                  <span className="text-xs font-semibold text-zinc-500 uppercase tracking-widest">
-                    Income
-                  </span>
-                  <span className="text-[10px] font-semibold text-zinc-600 bg-zinc-800 px-1.5 py-0.5 rounded">
-                    {incomeCategories.length}
-                  </span>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                  {incomeCategories.map((cat) => (
-                    <CategoryRow
-                      key={cat.id}
-                      category={cat}
-                      onEdit={() => setModal({ mode: "edit", category: cat })}
-                      onDelete={() => setDeleteTarget(cat)}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* empty state */}
-            {expenseCategories.length === 0 && incomeCategories.length === 0 && (
-              <div className="flex flex-col items-center justify-center py-20 gap-3">
+            {filtered.length > 0 ? (
+              <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                {filtered.map((cat) => (
+                  <CategoryRow
+                    key={cat.id}
+                    category={cat}
+                    onOpen={() => setDetailsTarget(cat)}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center gap-3 py-16">
                 <div className="w-12 h-12 rounded-2xl bg-zinc-800 flex items-center justify-center">
                   <Tag size={20} className="text-zinc-500" />
                 </div>
                 <div className="text-center">
-                  <p className="text-sm font-medium text-zinc-400">No categories</p>
+                  <p className="text-sm font-medium text-zinc-400">No categories found</p>
                   <p className="text-xs text-zinc-600 mt-0.5">
-                    Add your first category to get started
+                    Try a different search or filter.
                   </p>
                 </div>
               </div>
@@ -887,6 +981,27 @@ export function CategoriesView() {
         isOffline={isGuest}
         onClose={() => setModal({ mode: "closed" })}
         onSaved={loadCategories}
+      />
+      <CategoryDetailsModal
+        category={detailsTarget}
+        onClose={() => setDetailsTarget(null)}
+        onEdit={() => {
+          if (!detailsTarget) return;
+          setModal({ mode: "edit", category: detailsTarget });
+          setDetailsTarget(null);
+        }}
+        onDelete={() => {
+          if (!detailsTarget || detailsTarget.is_default) return;
+          setDeleteTarget(detailsTarget);
+          setDetailsTarget(null);
+        }}
+      />
+      <CategoryFilterSheet
+        open={filterOpen}
+        value={filter}
+        counts={typeCounts}
+        onChange={setFilter}
+        onClose={() => setFilterOpen(false)}
       />
       <DeleteConfirmModal
         category={deleteTarget}
