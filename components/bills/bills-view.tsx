@@ -228,6 +228,10 @@ function friendlyBillError(error: { code?: string; message?: string } | null | u
   return error?.message ?? "";
 }
 
+function logWalletBalanceSync(action: string, details: Record<string, unknown>) {
+  console.info("[wallet-balance-sync]", action, details);
+}
+
 async function syncRecurringMonthlyBills(userId: string) {
   const supabase = createClient();
   const { end } = monthBounds();
@@ -1089,25 +1093,13 @@ export function BillsView() {
       if (!currentBill) { setActionError("Bill was not found."); return; }
       if (currentBill.status === "paid") { void loadBills(undefined, { silent: true }); return; }
 
-      const { data: walletRow, error: walletReadError } = await supabase
-        .from("wallets")
-        .select("balance")
-        .eq("id", bill.wallet_id)
-        .eq("user_id", user.id)
-        .maybeSingle();
-
-      if (walletReadError) { setActionError(walletReadError.message); return; }
-      if (!walletRow) { setActionError("Selected wallet was not found."); return; }
-
       const amount = Number(currentBill.amount);
-      const previousBalance = Number(walletRow.balance ?? 0);
-      const { error: walletUpdateError } = await supabase
-        .from("wallets")
-        .update({ balance: previousBalance - amount })
-        .eq("id", bill.wallet_id)
-        .eq("user_id", user.id);
-
-      if (walletUpdateError) { setActionError(walletUpdateError.message); return; }
+      logWalletBalanceSync("supabase bill payment transaction", {
+        billId: bill.id,
+        walletId: bill.wallet_id,
+        type: "expense",
+        amount,
+      });
 
       const { error: transactionError } = await supabase.from("transactions").insert({
         user_id: user.id,
@@ -1120,11 +1112,6 @@ export function BillsView() {
       });
 
       if (transactionError) {
-        await supabase
-          .from("wallets")
-          .update({ balance: previousBalance })
-          .eq("id", bill.wallet_id)
-          .eq("user_id", user.id);
         setActionError(transactionError.message);
         return;
       }

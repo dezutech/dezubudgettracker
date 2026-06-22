@@ -20,6 +20,10 @@ function generateSyncId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+function logWalletBalanceSync(action: string, details: Record<string, unknown>) {
+  console.info("[wallet-balance-sync]", action, details);
+}
+
 function buildSyncEntry(
   userId: string,
   action: DbSyncQueueItem["action"],
@@ -144,6 +148,13 @@ export async function contributeToGoal(input: {
     if (nextAmount < goal.targetAmount && goal.status === "completed") goalUpdates.status = "active";
 
     if (linkedWallet?.id !== input.fromWalletId) {
+      logWalletBalanceSync("dexie goal contribution source", {
+        goalId: input.goalId,
+        walletId: input.fromWalletId,
+        type: "transfer",
+        amount: input.amount,
+        delta: -input.amount,
+      });
       await db.wallets.update(input.fromWalletId, {
         balance: fromWallet.balance - input.amount,
         updatedAt: ts,
@@ -151,6 +162,13 @@ export async function contributeToGoal(input: {
     }
 
     if (linkedWallet && linkedWallet.id !== input.fromWalletId) {
+      logWalletBalanceSync("dexie goal contribution destination", {
+        goalId: input.goalId,
+        walletId: linkedWallet.id,
+        type: "transfer",
+        amount: input.amount,
+        delta: input.amount,
+      });
       await db.wallets.update(linkedWallet.id, {
         balance: linkedWallet.balance + input.amount,
         updatedAt: ts,

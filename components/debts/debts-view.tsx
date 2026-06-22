@@ -200,6 +200,10 @@ function isMissingColumnError(error: { message?: string } | null | undefined, co
   return !!error?.message?.toLowerCase().includes(`column ${column.toLowerCase()} does not exist`);
 }
 
+function logWalletBalanceSync(action: string, details: Record<string, unknown>) {
+  console.info("[wallet-balance-sync]", action, details);
+}
+
 function dueLabel(debt: SupabaseDebt) {
   if (effectiveStatus(debt) === "paid") return "Paid";
   const diff = daysUntil(debt.due_date);
@@ -377,15 +381,6 @@ function DebtModal({
         if (result.error) { setError(result.error.message); return; }
       } else {
         const categoryId = await ensureSupabaseDebtCategory(debtType === "i_owe" ? "Borrowed Money" : "Money Lent", userId);
-        const { data: walletRow, error: walletReadError } = await supabase
-          .from("wallets")
-          .select("balance")
-          .eq("id", walletId)
-          .eq("user_id", userId)
-          .maybeSingle();
-        if (walletReadError) { setError(walletReadError.message); return; }
-        if (!walletRow) { setError("Selected wallet was not found."); return; }
-
         const { data: debtRow, error: debtError } = await supabase
           .from("debts")
           .insert(payload)
@@ -393,18 +388,12 @@ function DebtModal({
           .single();
         if (debtError) { setError(debtError.message); return; }
 
-        const previousBalance = Number(walletRow.balance ?? 0);
-        const nextBalance = previousBalance + (debtType === "i_owe" ? parsedOriginal : -parsedOriginal);
-        const { error: walletUpdateError } = await supabase
-          .from("wallets")
-          .update({ balance: nextBalance })
-          .eq("id", walletId)
-          .eq("user_id", userId);
-        if (walletUpdateError) {
-          await supabase.from("debts").delete().eq("id", debtRow.id).eq("user_id", userId);
-          setError(walletUpdateError.message);
-          return;
-        }
+        logWalletBalanceSync("supabase debt opening transaction", {
+          debtId: debtRow.id,
+          walletId,
+          type: debtType === "i_owe" ? "income" : "expense",
+          amount: parsedOriginal,
+        });
 
         const { error: txError } = await supabase.from("transactions").insert({
           user_id: userId,
@@ -420,7 +409,6 @@ function DebtModal({
           person_name: personName.trim(),
         });
         if (txError) {
-          await supabase.from("wallets").update({ balance: previousBalance }).eq("id", walletId).eq("user_id", userId);
           await supabase.from("debts").delete().eq("id", debtRow.id).eq("user_id", userId);
           setError(txError.message);
           return;
@@ -598,14 +586,6 @@ function PaymentModal({
         : "active";
       const supabase = createClient();
       const categoryId = await ensureSupabaseDebtCategory(debt.debt_type === "i_owe" ? "Debt Payment" : "Debt Collection", userId);
-      const { data: walletRow, error: walletReadError } = await supabase
-        .from("wallets")
-        .select("balance")
-        .eq("id", walletId)
-        .eq("user_id", userId)
-        .maybeSingle();
-      if (walletReadError) { setError(walletReadError.message); return; }
-      if (!walletRow) { setError("Selected wallet was not found."); return; }
 
       const { error: updateError } = await supabase
         .from("debts")
@@ -614,18 +594,12 @@ function PaymentModal({
         .eq("user_id", userId);
       if (updateError) { setError(updateError.message); return; }
 
-      const previousBalance = Number(walletRow.balance ?? 0);
-      const nextBalance = previousBalance + (debt.debt_type === "i_owe" ? -parsed : parsed);
-      const { error: walletUpdateError } = await supabase
-        .from("wallets")
-        .update({ balance: nextBalance })
-        .eq("id", walletId)
-        .eq("user_id", userId);
-      if (walletUpdateError) {
-        await supabase.from("debts").update({ remaining_balance: remaining, status: debt.status }).eq("id", debt.id).eq("user_id", userId);
-        setError(walletUpdateError.message);
-        return;
-      }
+      logWalletBalanceSync("supabase debt payment transaction", {
+        debtId: debt.id,
+        walletId,
+        type: debt.debt_type === "i_owe" ? "expense" : "income",
+        amount: parsed,
+      });
 
       const { error: txError } = await supabase.from("transactions").insert({
         user_id: userId,
@@ -641,7 +615,6 @@ function PaymentModal({
         person_name: debt.person_name,
       });
       if (txError) {
-        await supabase.from("wallets").update({ balance: previousBalance }).eq("id", walletId).eq("user_id", userId);
         await supabase.from("debts").update({ remaining_balance: remaining, status: debt.status }).eq("id", debt.id).eq("user_id", userId);
         setError(txError.message);
         return;

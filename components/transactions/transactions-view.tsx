@@ -287,10 +287,8 @@ function dayNet(txs: DisplayTx[]): number {
   );
 }
 
-function walletEffect(type: "income" | "expense" | "transfer", amount: number) {
-  if (type === "income") return amount;
-  if (type === "expense") return -amount;
-  return 0;
+function logWalletBalanceSync(action: string, details: Record<string, unknown>) {
+  console.info("[wallet-balance-sync]", action, details);
 }
 
 // ─── SelectField ─────────────────────────────────────────────────────────────
@@ -511,11 +509,16 @@ export function AddTransactionModal({
       }
 
       const supabase = createClient();
-      const wallet = wallets.find((item) => item.id === walletId);
-      if (!wallet) {
+      if (!wallets.some((item) => item.id === walletId)) {
         setError("Selected wallet was not found.");
         return;
       }
+      logWalletBalanceSync("supabase transaction create", {
+        type: txType,
+        amount: amt,
+        walletId,
+        source: "manual transaction",
+      });
 
       const { error: insertError } = await supabase.from("transactions").insert({
         user_id: userId,
@@ -531,35 +534,6 @@ export function AddTransactionModal({
 
       if (insertError) {
         setError(insertError.message);
-        return;
-      }
-
-      const { data: walletRow, error: walletReadError } = await supabase
-        .from("wallets")
-        .select("balance")
-        .eq("id", walletId)
-        .eq("user_id", userId)
-        .maybeSingle();
-
-      if (walletReadError) {
-        setError(walletReadError.message);
-        return;
-      }
-      if (!walletRow) {
-        setError("Selected wallet was not found.");
-        return;
-      }
-
-      const currentBalance = Number(walletRow?.balance ?? 0);
-      const balanceDelta = txType === "income" ? amt : -amt;
-      const { error: walletUpdateError } = await supabase
-        .from("wallets")
-        .update({ balance: currentBalance + balanceDelta })
-        .eq("id", walletId)
-        .eq("user_id", userId);
-
-      if (walletUpdateError) {
-        setError(walletUpdateError.message);
         return;
       }
 
@@ -753,31 +727,6 @@ function EditTransactionModal({
 
   const filteredCats = categories.filter((c) => c.type === txType);
 
-  async function adjustWallet(wallet: string, delta: number) {
-    const supabase = createClient();
-    const { data, error } = await loggedSupabase(
-      "wallets balance read",
-      supabase
-        .from("wallets")
-        .select("balance")
-        .eq("id", wallet)
-        .eq("user_id", userId)
-        .maybeSingle()
-    );
-    if (error) return error.message;
-    if (!data) return "Selected wallet was not found.";
-
-    const { error: updateError } = await loggedSupabase(
-      "wallets balance update",
-      supabase
-        .from("wallets")
-        .update({ balance: Number(data?.balance ?? 0) + delta })
-        .eq("id", wallet)
-        .eq("user_id", userId)
-    );
-    return updateError?.message ?? null;
-  }
-
   async function handleSave() {
     if (!tx) return;
     setError("");
@@ -816,8 +765,6 @@ function EditTransactionModal({
       }
 
       const supabase = createClient();
-      const oldEffect = walletEffect(tx.transaction_type, Number(tx.amount));
-      const newEffect = walletEffect(txType, parsed);
       const payload = {
         wallet_id: walletId,
         category_id: catId,
@@ -828,6 +775,15 @@ function EditTransactionModal({
         transaction_date: date,
         ...receipt,
       };
+      logWalletBalanceSync("supabase transaction update", {
+        transactionId: tx.id,
+        oldType: tx.transaction_type,
+        oldAmount: Number(tx.amount),
+        oldWalletId: tx.wallet_id,
+        newType: txType,
+        newAmount: parsed,
+        newWalletId: walletId,
+      });
 
       const { data: updatedRows, error: updateError } = await loggedSupabase(
         "transactions update",
@@ -840,16 +796,6 @@ function EditTransactionModal({
       );
 
       if (updateError) { setError(updateError.message); return; }
-
-      if (tx.wallet_id === walletId) {
-        const balanceError = await adjustWallet(walletId, newEffect - oldEffect);
-        if (balanceError) { setError(balanceError); return; }
-      } else {
-        const reverseError = await adjustWallet(tx.wallet_id, -oldEffect);
-        if (reverseError) { setError(reverseError); return; }
-        const applyError = await adjustWallet(walletId, newEffect);
-        if (applyError) { setError(applyError); return; }
-      }
 
       onSaved(((updatedRows ?? []) as SupabaseTransaction[])[0] ?? { ...tx, ...payload });
       onClose();
@@ -1357,73 +1303,19 @@ export function TransactionsView() {
 
       if (!user?.id) { setDeleteError("Please sign in to delete a transaction."); return; }
       const supabase = createClient();
+      logWalletBalanceSync("supabase transaction delete", {
+        transactionId: deleteTarget.id,
+        type: deleteTarget.transaction_type,
+        amount: Number(deleteTarget.amount),
+        walletId: deleteTarget.wallet_id,
+        destinationWalletId: deleteTarget.destination_wallet_id,
+      });
       const { error: deleteError } = await supabase
         .from("transactions")
         .update({ is_deleted: true })
         .eq("id", deleteTarget.id)
         .eq("user_id", user.id);
       if (deleteError) { setDeleteError(deleteError.message); return; }
-
-      if (deleteTarget.transaction_type === "transfer") {
-        if (!deleteTarget.destination_wallet_id) {
-          setDeleteError("Transfer destination wallet is missing.");
-          return;
-        }
-
-        const [sourceResult, destinationResult] = await Promise.all([
-          supabase
-            .from("wallets")
-            .select("balance")
-            .eq("id", deleteTarget.wallet_id)
-            .eq("user_id", user.id)
-            .maybeSingle(),
-          supabase
-            .from("wallets")
-            .select("balance")
-            .eq("id", deleteTarget.destination_wallet_id)
-            .eq("user_id", user.id)
-            .maybeSingle(),
-        ]);
-
-        if (sourceResult.error) { setDeleteError(sourceResult.error.message); return; }
-        if (destinationResult.error) { setDeleteError(destinationResult.error.message); return; }
-        if (!sourceResult.data || !destinationResult.data) {
-          setDeleteError("Transfer wallet was not found.");
-          return;
-        }
-
-        const amount = Number(deleteTarget.amount);
-        const { error: sourceUpdateError } = await supabase
-          .from("wallets")
-          .update({ balance: Number(sourceResult.data.balance ?? 0) + amount })
-          .eq("id", deleteTarget.wallet_id)
-          .eq("user_id", user.id);
-        if (sourceUpdateError) { setDeleteError(sourceUpdateError.message); return; }
-
-        const { error: destinationUpdateError } = await supabase
-          .from("wallets")
-          .update({ balance: Number(destinationResult.data.balance ?? 0) - amount })
-          .eq("id", deleteTarget.destination_wallet_id)
-          .eq("user_id", user.id);
-        if (destinationUpdateError) { setDeleteError(destinationUpdateError.message); return; }
-      } else {
-        const effect = walletEffect(deleteTarget.transaction_type, Number(deleteTarget.amount));
-        const { data: walletRow, error: walletReadError } = await supabase
-          .from("wallets")
-          .select("balance")
-          .eq("id", deleteTarget.wallet_id)
-          .eq("user_id", user.id)
-          .maybeSingle();
-        if (walletReadError) { setDeleteError(walletReadError.message); return; }
-        if (!walletRow) { setDeleteError("Selected wallet was not found."); return; }
-
-        const { error: walletUpdateError } = await supabase
-          .from("wallets")
-          .update({ balance: Number(walletRow?.balance ?? 0) - effect })
-          .eq("id", deleteTarget.wallet_id)
-          .eq("user_id", user.id);
-        if (walletUpdateError) { setDeleteError(walletUpdateError.message); return; }
-      }
 
       setRawTxs((current) => current.filter((tx) => tx.id !== deleteTarget.id));
       setDeleteTarget(null);

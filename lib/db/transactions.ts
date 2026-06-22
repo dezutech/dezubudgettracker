@@ -35,6 +35,10 @@ function balanceDelta(type: DbTransaction["type"], amount: number): number {
   return 0; // transfer handled separately (two-wallet update)
 }
 
+function logWalletBalanceSync(action: string, details: Record<string, unknown>) {
+  console.info("[wallet-balance-sync]", action, details);
+}
+
 function buildSyncEntry(
   userId: string,
   action: DbSyncQueueItem["action"],
@@ -162,6 +166,12 @@ export async function createTransaction(
       if (!sourceWallet)
         throw new Error(`Source wallet not found: id=${input.walletId}`);
 
+      logWalletBalanceSync("dexie transaction create source", {
+        type: input.type,
+        amount: input.amount,
+        walletId: input.walletId,
+        delta: balanceDelta(input.type, input.amount),
+      });
       await db.wallets.update(input.walletId, {
         balance: sourceWallet.balance + balanceDelta(input.type, input.amount),
         updatedAt: ts,
@@ -172,6 +182,12 @@ export async function createTransaction(
         const destWallet = await db.wallets.get(input.toWalletId);
         if (!destWallet)
           throw new Error(`Destination wallet not found: id=${input.toWalletId}`);
+        logWalletBalanceSync("dexie transaction create destination", {
+          type: input.type,
+          amount: input.amount,
+          walletId: input.toWalletId,
+          delta: input.amount,
+        });
         await db.wallets.update(input.toWalletId, {
           balance: destWallet.balance + input.amount,
           updatedAt: ts,
@@ -215,6 +231,13 @@ export async function updateTransaction(
       // ── Step 1: reverse old balance effect ──
       const oldSourceWallet = await db.wallets.get(existing.walletId);
       if (oldSourceWallet) {
+        logWalletBalanceSync("dexie transaction update reverse source", {
+          transactionId: id,
+          type: existing.type,
+          amount: existing.amount,
+          walletId: existing.walletId,
+          delta: -balanceDelta(existing.type, existing.amount),
+        });
         await db.wallets.update(existing.walletId, {
           balance:
             oldSourceWallet.balance -
@@ -225,6 +248,13 @@ export async function updateTransaction(
       if (existing.type === "transfer" && existing.toWalletId != null) {
         const oldDest = await db.wallets.get(existing.toWalletId);
         if (oldDest) {
+          logWalletBalanceSync("dexie transaction update reverse destination", {
+            transactionId: id,
+            type: existing.type,
+            amount: existing.amount,
+            walletId: existing.toWalletId,
+            delta: -existing.amount,
+          });
           await db.wallets.update(existing.toWalletId, {
             balance: oldDest.balance - existing.amount,
             updatedAt: ts,
@@ -241,6 +271,13 @@ export async function updateTransaction(
 
       const newSourceWallet = await db.wallets.get(updated.walletId);
       if (newSourceWallet) {
+        logWalletBalanceSync("dexie transaction update apply source", {
+          transactionId: id,
+          type: updated.type,
+          amount: updated.amount,
+          walletId: updated.walletId,
+          delta: balanceDelta(updated.type, updated.amount),
+        });
         await db.wallets.update(updated.walletId, {
           balance:
             newSourceWallet.balance +
@@ -251,6 +288,13 @@ export async function updateTransaction(
       if (updated.type === "transfer" && updated.toWalletId != null) {
         const newDest = await db.wallets.get(updated.toWalletId);
         if (newDest) {
+          logWalletBalanceSync("dexie transaction update apply destination", {
+            transactionId: id,
+            type: updated.type,
+            amount: updated.amount,
+            walletId: updated.toWalletId,
+            delta: updated.amount,
+          });
           await db.wallets.update(updated.toWalletId, {
             balance: newDest.balance + updated.amount,
             updatedAt: ts,
@@ -287,6 +331,13 @@ export async function deleteTransaction(id: number): Promise<void> {
       // Reverse balance on source wallet
       const sourceWallet = await db.wallets.get(tx.walletId);
       if (sourceWallet) {
+        logWalletBalanceSync("dexie transaction delete source", {
+          transactionId: id,
+          type: tx.type,
+          amount: tx.amount,
+          walletId: tx.walletId,
+          delta: -balanceDelta(tx.type, tx.amount),
+        });
         await db.wallets.update(tx.walletId, {
           balance:
             sourceWallet.balance - balanceDelta(tx.type, tx.amount),
@@ -298,6 +349,13 @@ export async function deleteTransaction(id: number): Promise<void> {
       if (tx.type === "transfer" && tx.toWalletId != null) {
         const destWallet = await db.wallets.get(tx.toWalletId);
         if (destWallet) {
+          logWalletBalanceSync("dexie transaction delete destination", {
+            transactionId: id,
+            type: tx.type,
+            amount: tx.amount,
+            walletId: tx.toWalletId,
+            delta: -tx.amount,
+          });
           await db.wallets.update(tx.toWalletId, {
             balance: destWallet.balance - tx.amount,
             updatedAt: ts,

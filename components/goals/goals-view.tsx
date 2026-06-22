@@ -424,6 +424,10 @@ function GoalDetailsModal({
   );
 }
 
+function logWalletBalanceSync(action: string, details: Record<string, unknown>) {
+  console.info("[wallet-balance-sync]", action, details);
+}
+
 const QUICK_AMOUNTS = [500, 1000, 5000, 10000];
 
 function ContributeModal({
@@ -546,34 +550,11 @@ function ContributeModal({
         setError("Select a From Wallet.");
         return;
       }
-      const sameWallet = linkedWallet?.id === sourceWallet.id;
       const originalGoalAmount = goal.currentAmount;
       const originalGoalStatus = goal.status;
-      let sourceUpdated = false;
-      let destinationUpdated = false;
       let goalUpdated = false;
 
       try {
-        if (!sameWallet) {
-          const { error: sourceError } = await supabase
-            .from("wallets")
-            .update({ balance: sourceWallet.balance - parsed })
-            .eq("id", sourceWallet.id)
-            .eq("user_id", userId);
-          if (sourceError) throw sourceError;
-          sourceUpdated = true;
-        }
-
-        if (linkedWallet && !sameWallet) {
-          const { error: destinationError } = await supabase
-            .from("wallets")
-            .update({ balance: linkedWallet.balance + parsed })
-            .eq("id", linkedWallet.id)
-            .eq("user_id", userId);
-          if (destinationError) throw destinationError;
-          destinationUpdated = true;
-        }
-
         const { error: goalError } = await supabase
           .from("goals")
           .update({
@@ -585,6 +566,13 @@ function ContributeModal({
         if (goalError) throw goalError;
         goalUpdated = true;
 
+        logWalletBalanceSync("supabase goal contribution transaction", {
+          goalId: goal.id,
+          walletId: sourceWallet.id,
+          destinationWalletId: linkedWallet?.id ?? null,
+          type: "transfer",
+          amount: parsed,
+        });
         const { error: transactionError } = await supabase.from("transactions").insert({
           user_id: userId,
           wallet_id: sourceWallet.id,
@@ -600,12 +588,6 @@ function ContributeModal({
         if (transactionError) throw transactionError;
       } catch (operationError) {
         await Promise.all([
-          sourceUpdated
-            ? supabase.from("wallets").update({ balance: sourceWallet.balance }).eq("id", sourceWallet.id).eq("user_id", userId)
-            : Promise.resolve({ error: null }),
-          destinationUpdated && linkedWallet
-            ? supabase.from("wallets").update({ balance: linkedWallet.balance }).eq("id", linkedWallet.id).eq("user_id", userId)
-            : Promise.resolve({ error: null }),
           goalUpdated
             ? supabase.from("goals").update({ current_amount: originalGoalAmount, status: originalGoalStatus }).eq("id", goal.id).eq("user_id", userId)
             : Promise.resolve({ error: null }),

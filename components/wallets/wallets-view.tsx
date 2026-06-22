@@ -95,6 +95,10 @@ function isCreditWalletType(type: string) {
   return normalized === "Credit Card" || normalized === "BNPL";
 }
 
+function logWalletBalanceSync(action: string, details: Record<string, unknown>) {
+  console.info("[wallet-balance-sync]", action, details);
+}
+
 function isSafeSvg(svg: string) {
   const lower = svg.toLowerCase();
   return !(
@@ -1502,32 +1506,12 @@ function TransferWalletModal({
       const supabase = createClient();
       const sourceId = String(fromWallet.id);
       const destinationId = String(toWallet.id);
-      const nextSourceBalance = fromWallet.balance - parsedAmount;
-      const nextDestinationBalance = toWallet.balance + parsedAmount;
-
-      const { error: sourceError } = await supabase
-        .from("wallets")
-        .update({ balance: nextSourceBalance })
-        .eq("id", sourceId)
-        .eq("user_id", userId);
-
-      if (sourceError) { setError(sourceError.message); return; }
-
-      const { error: destinationError } = await supabase
-        .from("wallets")
-        .update({ balance: nextDestinationBalance })
-        .eq("id", destinationId)
-        .eq("user_id", userId);
-
-      if (destinationError) {
-        await supabase
-          .from("wallets")
-          .update({ balance: fromWallet.balance })
-          .eq("id", sourceId)
-          .eq("user_id", userId);
-        setError(destinationError.message);
-        return;
-      }
+      logWalletBalanceSync("supabase wallet transfer transaction", {
+        walletId: sourceId,
+        destinationWalletId: destinationId,
+        type: "transfer",
+        amount: parsedAmount,
+      });
 
       const { error: transactionError } = await supabase.from("transactions").insert({
         user_id: userId,
@@ -1541,18 +1525,6 @@ function TransferWalletModal({
       });
 
       if (transactionError) {
-        await Promise.all([
-          supabase
-            .from("wallets")
-            .update({ balance: fromWallet.balance })
-            .eq("id", sourceId)
-            .eq("user_id", userId),
-          supabase
-            .from("wallets")
-            .update({ balance: toWallet.balance })
-            .eq("id", destinationId)
-            .eq("user_id", userId),
-        ]);
         setError(transactionError.message);
         return;
       }
