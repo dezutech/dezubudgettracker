@@ -52,7 +52,9 @@ import {
 } from "@/lib/receipts";
 
 type BillStatus = "unpaid" | "paid" | "overdue" | "scheduled";
-type FilterTab = "all" | "due_month" | "upcoming" | "overdue" | "paid";
+type BillStatusFilter = "all" | "unpaid" | "paid" | "overdue" | "due_today" | "due_soon" | "upcoming";
+type BillDateFilter = "all" | "this_month" | "next_30_days" | "this_year" | "custom";
+type BillSortBy = "due_nearest" | "due_latest" | "amount" | "title" | "created";
 
 type SupabaseWallet = {
   id: string;
@@ -79,6 +81,7 @@ type SupabaseBill = {
   receipt_file_name: string | null;
   receipt_mime_type: string | null;
   receipt_size: number | null;
+  created_at: string;
 };
 
 type SupabaseRecurringRow = {
@@ -134,6 +137,7 @@ function localBillToSupabase(bill: DbBill): SupabaseBill {
     receipt_file_name: bill.receipt_file_name ?? null,
     receipt_mime_type: bill.receipt_mime_type ?? null,
     receipt_size: bill.receipt_size ?? null,
+    created_at: bill.createdAt,
   };
 }
 
@@ -163,6 +167,18 @@ function monthBounds(date = new Date()) {
   return { start: toIsoDate(start), end: toIsoDate(end) };
 }
 
+function yearBounds(date = new Date()) {
+  const start = new Date(date.getFullYear(), 0, 1);
+  const end = new Date(date.getFullYear(), 11, 31);
+  return { start: toIsoDate(start), end: toIsoDate(end) };
+}
+
+function nextThirtyDayBounds(date = new Date()) {
+  const end = new Date(date);
+  end.setDate(end.getDate() + 30);
+  return { start: todayIso(), end: toIsoDate(end) };
+}
+
 function nextMonthDate(iso: string) {
   const date = new Date(iso + "T00:00:00");
   date.setMonth(date.getMonth() + 1);
@@ -189,6 +205,15 @@ function effectiveStatus(bill: SupabaseBill): BillStatus {
   return bill.status;
 }
 
+function actionStatus(bill: SupabaseBill): BillStatusFilter {
+  if (bill.status === "paid") return "paid";
+  const diff = daysUntil(bill.due_date);
+  if (diff < 0) return "overdue";
+  if (diff === 0) return "due_today";
+  if (diff <= 3) return "due_soon";
+  return "upcoming";
+}
+
 function dueLabel(bill: SupabaseBill) {
   const diff = daysUntil(bill.due_date);
   if (bill.status === "paid") return "Paid";
@@ -208,6 +233,56 @@ function isUpcoming(bill: SupabaseBill) {
   const end = new Date();
   end.setDate(end.getDate() + 30);
   return bill.status !== "paid" && bill.due_date >= today && bill.due_date <= toIsoDate(end);
+}
+
+function billMatchesStatusFilter(bill: SupabaseBill, statusFilter: BillStatusFilter) {
+  if (statusFilter === "all") return true;
+  if (statusFilter === "unpaid") return bill.status !== "paid";
+  return actionStatus(bill) === statusFilter;
+}
+
+function billMatchesDateFilter(
+  bill: SupabaseBill,
+  dateFilter: BillDateFilter,
+  customStartDate: string,
+  customEndDate: string
+) {
+  if (dateFilter === "all") return true;
+
+  let range: { start?: string; end?: string };
+  if (dateFilter === "this_month") range = monthBounds();
+  else if (dateFilter === "next_30_days") range = nextThirtyDayBounds();
+  else if (dateFilter === "this_year") range = yearBounds();
+  else range = { start: customStartDate || undefined, end: customEndDate || undefined };
+
+  if (range.start && bill.due_date < range.start) return false;
+  if (range.end && bill.due_date > range.end) return false;
+  return true;
+}
+
+function billPriorityGroup(bill: SupabaseBill, statusFilter: BillStatusFilter) {
+  if (statusFilter === "paid") return 0;
+  const order: Record<BillStatusFilter, number> = {
+    overdue: 0,
+    due_today: 1,
+    due_soon: 2,
+    upcoming: 3,
+    paid: 4,
+    all: 3,
+    unpaid: 3,
+  };
+  return order[actionStatus(bill)];
+}
+
+function compareBills(a: SupabaseBill, b: SupabaseBill, sortBy: BillSortBy, statusFilter: BillStatusFilter) {
+  const groupDiff = billPriorityGroup(a, statusFilter) - billPriorityGroup(b, statusFilter);
+  if (groupDiff !== 0) return groupDiff;
+
+  if (sortBy === "due_latest") return b.due_date.localeCompare(a.due_date) || a.title.localeCompare(b.title);
+  if (sortBy === "amount") return Number(b.amount) - Number(a.amount) || a.due_date.localeCompare(b.due_date);
+  if (sortBy === "title") return a.title.localeCompare(b.title) || a.due_date.localeCompare(b.due_date);
+  if (sortBy === "created") return b.created_at.localeCompare(a.created_at) || a.due_date.localeCompare(b.due_date);
+  return a.due_date.localeCompare(b.due_date) || a.title.localeCompare(b.title);
 }
 
 function normalizeGeneratedStatus(dueDate: string): BillStatus {
@@ -811,47 +886,103 @@ function BillDetailsModal({
 
 function BillsFilterModal({
   open,
-  tabs,
-  value,
-  onChange,
+  statusFilter,
+  dateFilter,
+  sortBy,
+  customStartDate,
+  customEndDate,
+  onStatusChange,
+  onDateChange,
+  onSortChange,
+  onCustomStartDateChange,
+  onCustomEndDateChange,
+  onReset,
   onClose,
 }: {
   open: boolean;
-  tabs: Array<{ key: FilterTab; label: string; count: number }>;
-  value: FilterTab;
-  onChange: (value: FilterTab) => void;
+  statusFilter: BillStatusFilter;
+  dateFilter: BillDateFilter;
+  sortBy: BillSortBy;
+  customStartDate: string;
+  customEndDate: string;
+  onStatusChange: (value: BillStatusFilter) => void;
+  onDateChange: (value: BillDateFilter) => void;
+  onSortChange: (value: BillSortBy) => void;
+  onCustomStartDateChange: (value: string) => void;
+  onCustomEndDateChange: (value: string) => void;
+  onReset: () => void;
   onClose: () => void;
 }) {
   if (!open) return null;
 
+  const fieldClass = "h-10 w-full rounded-lg border border-border bg-[var(--theme-card)] px-3 text-sm text-foreground focus:border-[var(--theme-primary)]/60 focus:outline-none focus:ring-2 focus:ring-[var(--theme-primary)]/30";
+
   return (
     <div className="fixed inset-0 z-[70] flex items-end justify-center p-0 sm:items-center sm:p-4">
       <div className="absolute inset-0 theme-overlay backdrop-blur-sm" onClick={onClose} />
-      <div className="theme-surface relative w-full rounded-t-2xl shadow-2xl ring-1 ring-border sm:max-w-md sm:rounded-2xl">
+      <div className="theme-surface relative w-full rounded-t-2xl shadow-2xl ring-1 ring-border sm:max-w-lg sm:rounded-2xl">
         <div className="flex items-center justify-between border-b border-border px-5 py-4">
           <h2 className="text-base font-semibold text-card-foreground">Filters</h2>
           <button type="button" onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
             <X size={15} />
           </button>
         </div>
-        <div className="grid gap-2 px-5 py-5">
-          {tabs.map((tab) => (
-            <button
-              key={tab.key}
-              type="button"
-              onClick={() => {
-                onChange(tab.key);
-                onClose();
-              }}
-              className={cn(
-                "flex min-h-11 items-center justify-between rounded-xl px-3 text-sm font-medium transition-colors",
-                value === tab.key ? "theme-selected" : "theme-hover bg-[var(--theme-card)] text-muted-foreground ring-1 ring-border"
-              )}
-            >
-              <span>{tab.label}</span>
-              <span className="rounded px-1.5 text-xs font-semibold tabular-nums opacity-75">{tab.count}</span>
-            </button>
-          ))}
+        <div className="grid max-h-[75vh] gap-4 overflow-y-auto px-5 py-5">
+          <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
+            Status
+            <select value={statusFilter} onChange={(event) => onStatusChange(event.target.value as BillStatusFilter)} className={fieldClass}>
+              <option value="all">All</option>
+              <option value="unpaid">Unpaid</option>
+              <option value="paid">Paid</option>
+              <option value="overdue">Overdue</option>
+              <option value="due_today">Due Today</option>
+              <option value="due_soon">Due Soon</option>
+              <option value="upcoming">Upcoming</option>
+            </select>
+          </label>
+
+          <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
+            Date Range
+            <select value={dateFilter} onChange={(event) => onDateChange(event.target.value as BillDateFilter)} className={fieldClass}>
+              <option value="all">All Dates</option>
+              <option value="this_month">This Month</option>
+              <option value="next_30_days">Next 30 Days</option>
+              <option value="this_year">This Year</option>
+              <option value="custom">Custom Date Range</option>
+            </select>
+          </label>
+
+          {dateFilter === "custom" && (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
+                Start Date
+                <Input type="date" value={customStartDate} onChange={(event) => onCustomStartDateChange(event.target.value)} className="h-10 border-border bg-[var(--theme-card)] text-sm" />
+              </label>
+              <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
+                End Date
+                <Input type="date" value={customEndDate} onChange={(event) => onCustomEndDateChange(event.target.value)} className="h-10 border-border bg-[var(--theme-card)] text-sm" />
+              </label>
+            </div>
+          )}
+
+          <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
+            Sort By
+            <select value={sortBy} onChange={(event) => onSortChange(event.target.value as BillSortBy)} className={fieldClass}>
+              <option value="due_nearest">Due Date (Nearest First)</option>
+              <option value="due_latest">Due Date (Latest First)</option>
+              <option value="amount">Amount</option>
+              <option value="title">Title</option>
+              <option value="created">Created Date</option>
+            </select>
+          </label>
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-4">
+          <button type="button" onClick={onReset} className="theme-hover rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors">
+            Reset
+          </button>
+          <button type="button" onClick={onClose} className="rounded-lg bg-emerald-500 px-5 py-2 text-sm font-semibold text-zinc-950 transition-colors hover:bg-emerald-400">
+            Apply
+          </button>
         </div>
       </div>
     </div>
@@ -867,7 +998,11 @@ export function BillsView() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
-  const [filter, setFilter] = useState<FilterTab>("all");
+  const [statusFilter, setStatusFilter] = useState<BillStatusFilter>("all");
+  const [dateFilter, setDateFilter] = useState<BillDateFilter>("all");
+  const [sortBy, setSortBy] = useState<BillSortBy>("due_nearest");
+  const [customStartDate, setCustomStartDate] = useState("");
+  const [customEndDate, setCustomEndDate] = useState("");
   const [search, setSearch] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
   const [modal, setModal] = useState<BillFormState>({ mode: "closed" });
@@ -927,7 +1062,7 @@ export function BillsView() {
           "bills",
           supabase
             .from("bills")
-            .select("id,user_id,title,amount,due_date,category_id,wallet_id,status,notes,is_recurring,recurring_id,generated_occurrence_date,bill_id,receipt_url,receipt_path,receipt_file_name,receipt_mime_type,receipt_size")
+            .select("id,user_id,title,amount,due_date,category_id,wallet_id,status,notes,is_recurring,recurring_id,generated_occurrence_date,bill_id,receipt_url,receipt_path,receipt_file_name,receipt_mime_type,receipt_size,created_at")
             .eq("user_id", user.id)
             .eq("is_deleted", false)
             .order("due_date", { ascending: true })
@@ -1003,11 +1138,8 @@ export function BillsView() {
   const filteredBills = useMemo(() => {
     const q = search.trim().toLowerCase();
     return bills.filter((bill) => {
-      const status = effectiveStatus(bill);
-      if (filter === "due_month" && !isDueThisMonth(bill)) return false;
-      if (filter === "upcoming" && !isUpcoming(bill)) return false;
-      if (filter === "overdue" && status !== "overdue") return false;
-      if (filter === "paid" && bill.status !== "paid") return false;
+      if (!billMatchesStatusFilter(bill, statusFilter)) return false;
+      if (!billMatchesDateFilter(bill, dateFilter, customStartDate, customEndDate)) return false;
       if (q) {
         const category = bill.category_id ? categoryMap.get(bill.category_id)?.name ?? "" : "";
         const wallet = bill.wallet_id ? walletMap.get(bill.wallet_id)?.name ?? "" : "";
@@ -1016,8 +1148,8 @@ export function BillsView() {
         );
       }
       return true;
-    });
-  }, [bills, categoryMap, filter, search, walletMap]);
+    }).sort((a, b) => compareBills(a, b, sortBy, statusFilter));
+  }, [bills, categoryMap, customEndDate, customStartDate, dateFilter, search, sortBy, statusFilter, walletMap]);
 
   async function handleDeleteBill() {
     if (!deleteTarget) return;
@@ -1147,13 +1279,15 @@ export function BillsView() {
     }
   }
 
-  const tabs: Array<{ key: FilterTab; label: string; count: number }> = [
-    { key: "all", label: "All", count: counts.all },
-    { key: "due_month", label: "This Month", count: counts.dueMonth },
-    { key: "upcoming", label: "Upcoming", count: counts.upcoming },
-    { key: "overdue", label: "Overdue", count: counts.overdue },
-    { key: "paid", label: "Paid", count: counts.paid },
-  ];
+  const hasActiveFilters = statusFilter !== "all" || dateFilter !== "all" || sortBy !== "due_nearest" || Boolean(search.trim());
+
+  function resetFilters() {
+    setStatusFilter("all");
+    setDateFilter("all");
+    setSortBy("due_nearest");
+    setCustomStartDate("");
+    setCustomEndDate("");
+  }
 
   return (
     <>
@@ -1209,7 +1343,10 @@ export function BillsView() {
               <button
                 type="button"
                 onClick={() => setFilterOpen(true)}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-zinc-900 text-zinc-500 ring-1 ring-zinc-800 transition-colors hover:bg-[var(--theme-primary-soft)] hover:text-[var(--theme-primary)]"
+                className={cn(
+                  "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ring-1 transition-colors hover:bg-[var(--theme-primary-soft)] hover:text-[var(--theme-primary)]",
+                  hasActiveFilters ? "bg-[var(--theme-primary-soft)] text-[var(--theme-primary)] ring-[var(--theme-primary)]/30" : "bg-zinc-900 text-zinc-500 ring-zinc-800"
+                )}
                 title="Filters"
                 aria-label="Open bill filters"
               >
@@ -1270,9 +1407,17 @@ export function BillsView() {
 
       <BillsFilterModal
         open={filterOpen}
-        tabs={tabs}
-        value={filter}
-        onChange={setFilter}
+        statusFilter={statusFilter}
+        dateFilter={dateFilter}
+        sortBy={sortBy}
+        customStartDate={customStartDate}
+        customEndDate={customEndDate}
+        onStatusChange={setStatusFilter}
+        onDateChange={setDateFilter}
+        onSortChange={setSortBy}
+        onCustomStartDateChange={setCustomStartDate}
+        onCustomEndDateChange={setCustomEndDate}
+        onReset={resetFilters}
         onClose={() => setFilterOpen(false)}
       />
 
